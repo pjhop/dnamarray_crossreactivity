@@ -1,0 +1,386 @@
+---
+title: "Supplementary Note"
+author: "Paul Hop"
+date: "7/2020"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 3
+  pdf_document:
+    toc: true
+    toc_depth: 3
+bibliography: Paper.bib
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE)
+```
+
+```{r data, include = FALSE}
+library(tidyverse)
+# MLMA results 
+mlma <- read_tsv("../data/output/ewas/mlma_loco_c9_covarsexbatch_qcovaragesmoking_missing0.05.loco.mlma")
+mlma_oob <- read_tsv("../data/output/ewas/mlma_moa_c9_covarsexbatch_qcovaragesmoking_oob.mlma")
+mlma <- mlma %>% dplyr::mutate(t = b / se)
+mlma_oob <- mlma_oob %>% 
+  dplyr::rename(p_oob = p) %>%
+  dplyr::mutate(t_oob = b / se)
+  
+mlma_sig <- mlma %>% dplyr::filter(p < 0.05/nrow(.))
+mlma_oob_sig <- mlma_oob %>% dplyr::filter(p_oob < 0.05/nrow(.))
+# Samplesheet
+samplesheet_raw <- readRDS("../data/raw/samplesheet_NL.rds")
+samplesheet <- readRDS("../data/raw/samplesheet_NL_cleaned.rds")
+# Betas
+beta <- readRDS("../data/processed/beta_mlma_c9_loco_sig.rds")
+
+# Subset of the beta-matrix (significant probes)
+samplesheet_c9mutated <- samplesheet %>% dplyr::filter(Inferred_C9_status == "long")
+beta_sig <- beta[mlma_sig$Probe,samplesheet_c9mutated$Sample_Name]
+```
+
+### Introduction
+
+In the manuscript, we discuss several analytical checks that can aid in identifying cross-reactive probes.
+Here, we provide additional comments on these checks, discussing what they can and cannot tell about potential cross-reactivity issues.
+Moreover, we provide example R code for each check.
+For all scripts used in the manuscript, please visit: http://github.com/pjhop/dnamarray_crossreactivity.
+We wrapped several scripts into an R package which we also use in this document.
+The package is available at: http://github.com/pjhop/DNAmCrosshyb.
+
+### 1. Off-target sequence matches
+
+As suggested by previous studies, we recommend checking significant probes for off-target matches.
+The annotation files published by Zhou *et al.* [@zhou_comprehensive_2017] provide a good starting point and can be downloaded here:
+https://zwdzwd.github.io/InfiniumAnnotation 
+These files contain information on the number of off-target matches at different match lengths for each probe, and other useful information such as SNP-masking and probe-mapping quality (also see 7. Other issues).  
+The authors recommend removing probes with one or more >=30bp off-target matches.
+However, we note that:
+
+1. Sequence matches <30bp can be sufficient for detectable cross-hybridization.
+This is especially the case when those off-target matches measure similar DNA methylation levels,
+for example when the off-target matches are located in a repeat region. It is not straightforward to determine a exact cutoff. For example, many 20-25bp off-target matches may be more problematic (for example when a probes maps to a tandem repeat) than 1 30bp off-target match. We therefore recommend careful examination of the results, the other checks described in this document can help in identifying issues. 
+
+2. Imperfect matches off-target matches (i.e. allow mismatched INDELs) may lead to spurious associations. Additionally, by allowing a mismatch you also account for probes that may match an off-target region only when a SNP is present. 
+
+3. Genetic variation (especially structural variation such as tandem repeats) associated with the phenotype should be taken into account, since these are not taken into account by mapping probes to the reference genome. 
+
+#### Examples
+
+Zhou annotations:
+
+```{r zhou_annotation, message = FALSE}
+path_zhou_hg38 <- "http://zwdzwd.io/InfiniumAnnotation/20180909/HM450/HM450.hg38.manifest.tsv.gz"
+path_zhou_cn <- "http://zwdzwd.io/InfiniumAnnotation/20180909/HM450/HM450.hg38.3sub.copynumber.tsv.gz"
+zhou_hg38 <- readr::read_tsv(path_zhou_hg38)
+zhou_cn <- readr::read_tsv(path_zhou_cn)
+```
+
+```{r zhou_hg38, message = FALSE}
+# The MASK_sub30_copy column indicates that the probe has one or more >=30 bp off-target matches.
+# The MASK_mapping column indicates that the probe has a low quality score
+zhou_hg38 %>% dplyr::select(probeID, MASK_sub30_copy, MASK_mapping) %>%
+  dplyr::filter(MASK_sub30_copy | MASK_mapping) %>%
+  head()
+```
+
+Mapping probes to a non-reference sequence using the `DNAmCrosshyb` package (GGCCC hexanucleotide repeat)
+
+```{r map_probes_c9, cache = TRUE, message = FALSE}
+library(DNAmCrosshyb)
+# Map probes to the C9orf72 hexanucleotide repeat
+repeat_sequence <- paste(rep("GGCCCC", 10), collapse="")
+
+matches_c9 <- map_probes_sequence(sequence = repeat_sequence, next_base = "G", prev_base = "C",
+                            array = "450k", min_width = 10, 
+                            max_width = 25, allow_indel = FALSE, 
+                            allow_mismatch = FALSE, step_size = 1, 
+                            use_Y = FALSE, methylation_status = "methylated")
+data.frame(matches_c9 %>% dplyr::arrange(desc(width))) %>% head()
+```
+
+Mapping probes to several disease-associated repeat-sequences:
+
+```{r, warning = FALSE, message = FALSE, cache = TRUE}
+library(DNAmCrosshyb)
+## run for several sequences 
+sequences <- list(
+  ATTCT = list(
+    sequence = paste(rep("ATTCT", 15), collapse=""),
+    prev_base = "T",
+    next_base = "A"
+  ),
+  CAG = list(
+    sequence = paste(rep("CAG", 20), collapse=""),
+    prev_base = "G",
+    next_base = "C"
+  ),
+  CTG = list(
+    sequence = paste(rep("CTG", 20), collapse=""),
+    prev_base = "G",
+    next_base = "C"
+  ),
+  GAA = list(
+    sequence = paste(rep("GAA", 20), collapse=""),
+    prev_base = "A",
+    next_base = "G"
+  ),
+  GCC = list(
+    sequence = paste(rep("GCC", 20), collapse=""),
+    prev_base = "C",
+    next_base = "G"
+  ),
+  GCG = list(
+    sequence = paste(rep("GCG", 20), collapse=""),
+    next_base = "G",
+    prev_base = "G"
+  ),
+  CGG = list(
+    sequence = paste(rep("CGG", 20), collapse=""),
+    next_base = "C",
+    prev_base = "G"
+)
+)
+
+run <- function(lst) {
+  matches <- map_probes_sequence(sequence = lst[["sequence"]], 
+                                 next_base = lst[["next_base"]], 
+                                 prev_base = lst[["prev_base"]],
+                      array = "450k", min_width = 10, max_width = 35, 
+                      allow_indel = TRUE, 
+                      allow_mismatch = TRUE, step_size = 1, 
+                      use_Y = TRUE)
+  matches
+}
+
+matches_all <- purrr::map(sequences, .f = run)
+names(matches_all) <- names(sequences)
+
+# Check number of probes with >=14bp match for each sequence 
+# Check if filtered by zhou et al 
+zhou <- readr::read_tsv("../data/extdata/hm450.hg38.manifest.tsv.gz")
+zhou <- zhou %>% dplyr::filter(MASK_sub30_copy | MASK_mapping)
+make_overview <- function(sequence, matches_all) {
+  check <- matches_all[[sequence]] %>% dplyr::filter(width >= 14)
+  tibble(sequence = sequence, n_cr = dplyr::n_distinct(check$Probe), 
+         n_cr_zhou = sum(unique(check$Probe) %in% zhou$probeID))
+}
+overview <- purrr::map_df(names(matches_all), .f = make_overview, matches_all=matches_all)
+overview
+```
+
+Mapping probes to the reference genome sequence, allowing mismatches and identifying off-target matches as small as 15bp. 
+
+```{r map_probes_ref, cache = TRUE, message = FALSE}
+probes <- c("cg00005164", "cg12344104", "cg25521682", 
+            "cg27660038", "cg20554142", "cg03890998", 
+            "cg00947801")
+matches <- map_probes(probes,
+                      path = "../data/genome_bs/hg19",
+                      chromosomes = "all",
+                      min_width = 15,
+                      max_width = 35,
+                      step_size = 5,
+                      allow_mismatch = TRUE,
+                      allow_INDEL = FALSE,
+                      cores = 1
+                     )
+head(matches %>% dplyr::arrange(desc(width)) %>% data.frame())
+```
+
+Number of matches per probe:
+
+```{r nr_matches_per_probe, cache = TRUE}
+library(DNAmCrosshyb)
+nr_matches <- get_nr_matches_per_probe(matches)
+nr_matches
+```
+
+Overlap between off-target matches and repeat sequences:
+
+```{r repeat_overlap, cache = FALSE, message = FALSE, warning = FALSE}
+library(DNAmCrosshyb)
+matches <- find_repeat_overlaps(matches, genome_build = "hg19", min_overlap = "any")
+head(matches %>% data.frame())
+```
+
+### 2. Correlations among (near-)significant probes
+
+Correlations among distal (near-)significant probes may be indicative of a technical issues.
+
+#### Notes
+
+1. Correlations may also be caused by biological factors.
+For example, a mutation in a gene that regulates DNA methylation, such as *DNMT3A*, may result in correlated differentially methylated CpG-sites.
+Moreover, confounding factors, such as batch effects and white blood cell composition, often result in groups of correlated probes.
+Although in the latter case correlations are not caused by cross-hybridization, they do often represent unwanted variation.
+In case of correlated probes, checking for sequence overlap will help in distinguishing between cross-hybridization-related correlation and other sources. The `get_probe_overlaps()` function in the `DNAmCrosshyb` package can be used to do this (see example in next section).
+
+#### Example
+
+Example of a correlation heatmap of the sites significantly associated with C9 status in our study. 
+Note that 2 blocks of probes are correlated. The left upper corner includes the *trans* probes that we found to be cross-reactive (to the C9 repeat).
+The middle block consists of four probes that are all located within the same region (CpG island within the *C9orf72* gene).
+
+```{r heatmap}
+# Heatmap
+library(pheatmap)
+pal <- viridis::viridis(n = 200)
+breaksList = seq(-1,1, by = 0.01)
+heatmap <- pheatmap(cor(t(beta_sig), use = "complete.obs"),
+                            color = pal,
+                            breaks = breaksList,
+                            width = 3, height = 4,
+                            fontsize = 5)
+```
+
+### 3. Sequence overlap between (near-)significant probes 
+
+This point is related to the previous one: it is suspicious when significant sites share similar probe sequences. 
+
+#### Examples
+
+The `get_probe_overlaps` function in the `DNAmCrosshyb` package can be used to check for overlapping 3'-subsequences in a set of probes. Here we apply this function to the probes that were significant in the C9 EWAS. We found that all *trans* probes that were correlated had a >=10bp overlap with each other. 
+
+```{r get_probe_overlaps}
+library(DNAmCrosshyb)
+overlaps <- get_probe_overlaps(c(mlma_sig$Probe, mlma_oob_sig$Probe))
+overlaps %>% dplyr::arrange(desc(overlaps$overlap))
+```
+
+Plot overlaps:
+
+```{r}
+ggplot(overlaps %>% filter(Probe_Index != Probe_Target), 
+       aes(x = overlap)) +
+  geom_histogram() +
+  theme_classic() + 
+  xlab("Pair-wise probe overlap (bp)") +
+  geom_vline(xintercept = 14, linetype = "dashed", color = "red") +
+  theme(text = element_text(size=13))
+```
+
+Check for each probe with how many other probes is has a >=10bp sequence overlap. 
+
+```{r get_probe_overlaps2}
+check <- overlaps %>% dplyr::group_by(Bead_Index) %>% summarize(n = sum(overlap >= 10))
+check %>% dplyr::filter(n > 1)
+```
+
+
+### 4. Absence of regional effects at the target locus
+
+We often expect that DNA methylation changes are not restricted to specific CpG-sites, but extend to surrounding regions.
+Therefore, a 'lonely hit', i.e. a signification association without any signal in the surrounding CpGs may indicate a technical issue.
+Instead of focusing on differentially methylated positions (DMPs), differentially methylated regions (DMRs) may be more biologically relevant and more robust to technical issues [@mill_promises_2013]
+
+#### Notes
+
+1. Illumina DNA methylation arrays have a limited resolution, CpG-sites surrounding a target locus may not be measured.
+Therefore, identifying DMRs cannot completely replace DMPs, since a DMP may be reflective of a regional effect that is not measured and in certain cases DNA methylation changes may be restricted to only one or a feq sites.
+
+#### Examples
+
+The `locusplot()` function from the `DNAmCrossHyb` package can be used to plot a significant CpG-site and its neighbouring CpG-sites.
+
+##### (Likely) True positive
+
+First, we show a locus plot of the C9 island, which is very likely to be a true positive (found in different studies/tissues/techniques). Here, there is a regional effect, strengthening the evidence for a real biological effect:
+
+```{r locus_plot, fig.height = 4, fig.width = 6}
+library(DNAmCrosshyb)
+
+# First an example of probes in the C9 island, 
+# these probes are very likely to be true positives (found in different # studies/tissues/techniques)
+locusplot("cg05990720", stats = mlma, 
+          windowsize = 5000, significance_line = TRUE)
+```
+
+##### False positive
+
+Here, we plot one of the significant *trans* probes. There is a very significant effect in one site, but no effect at all in the neighboring sites, which is a warning sign:
+
+```{r locus_plot_trans, fig.height = 4, fig.width = 6}
+# Example of a cross-reactive probe:
+locusplot("cg16517021", stats = mlma, 
+          windowsize = 5000, significance_line = TRUE)
+```
+
+### 5. Associations in type I OOB channels
+
+In the manuscript we show that several probes were significant in an EWAS on $\beta$-values derived from the out-of-band (OOB) channels.
+All these probes were probes with a partial match to the C9 repeat and were predicted to result in OOB sigal upon cross-hybridization.
+We thus found that inspecting OOB $\beta$-values can aid in identifying technical issues.
+
+#### Notes
+
+1. Associations in the OOB channels are in itself not problematic,
+since signals from these channels are not used in analyses.
+However, associations in OOB channels can help in identifying problematic sequences.
+In the *C9orf72* case, all OOB associations shared the same sequence, and thus helped pointing towards problematic probe sequences that also affected in-band associations.
+
+#### Example
+
+We included a function to extract OOB betas/intensities from a RGset (*minfi*). Within this function, data is first normalized using the *naten* function from the *wateRmelon* package. An EWAS can then be performed on these betas using your preferred EWAS method (we prefer the OSCA method [@zhang_osca:_2019-1]).
+
+```{r get_oob_betas, eval = FALSE}
+oob <- get_OOB(rgset, normalized = TRUE, keep = "both")
+oob_betas <- oob$betas
+oob_total_intensities <- oob$total
+```
+
+### 6. Associations between total intensity and the phenotype
+
+An association between total signal intensity and the phenotype may indicate differences in the number of hybridization events.
+In that case, this indicates that there is either a copy number difference at the target locus, or that the probe cross-hybridizes to a region where there is a copy number difference.
+
+#### Notes
+1. Signal intensity effects may be confounded by signal saturation effects,
+that is,
+for some probes $\beta$-values near 1 or 0 (i.e. fully methylated, or fully unmethylated) tend to have lower total signal intensities than $\beta$-values near 0.5 (intermediate methylation) [@zhou_sesame:_2018]. 
+Thus, total signal intensity differences are especially informative when the direction of effect is opposite to what is to be expected based on signal saturation effects. For example, when $\beta$-values in the phenotype of interest are closer to 0.5, but total intensities are lower, this cannot be explained by signal saturation effects.
+
+#### Examples
+
+EWAS methods normally used on  $\beta$-values (or M-values) can also be used to test for associations between total signal intensities and the phenotype of interest. 
+Extracting total signal intensities:
+
+```{r get_signal_intensities, eval = FALSE}
+# In-band 
+library(wateRmelon)
+library(minfi)
+
+# Extract total signal intensities after normalization using dasen
+rgset <- dasen(rgset)
+total <- getCN(rgset)
+
+# Extract total OOB signal intensities after normalization using dasen
+# Using the function from DNAmCrosshyb
+oob <- get_OOB(rgset, normalized = TRUE, keep = "both")
+oob_total <- oob$total
+
+```
+
+### 7. Other issues
+
+Finally, we note that in addition to cross-hybridization, other issues such as SNPs underlying the probe sequence could result in spurious associations. These issues are outside the scope of the current work, but we note that previously studies have considered these issues in detail [@zhou_comprehensive_2017; @andrews_gap_2016]. Example using population-specific SNP masking from Zhou *et al.*
+
+```{r, message = FALSE}
+path_zhou_pop <- "http://zwdzwd.io/InfiniumAnnotation/current/HM450/HM450.hg38.manifest.pop.tsv.gz"
+anno_pop <- readr::read_tsv(path_zhou_pop)
+
+## Select SNP-containing probes based on European population:
+anno_pop_EUR <- anno_pop %>%
+  dplyr::filter(MASK_snp5_EUR)
+```
+
+Furthermore, one might want to filter probes that have a low mapping quality:
+
+```{r, message = FALSE}
+path <- "http://zwdzwd.io/InfiniumAnnotation/current/HM450/HM450.hg38.manifest.tsv.gz"
+anno_zhou <- readr::read_tsv(path)
+anno_zhou %>% dplyr::filter(MASK_mapping) %>% dplyr::select(probeID, MASK_mapping) %>% head()
+```
+
+### References
+

@@ -1,0 +1,1982 @@
+---
+title: "Illumina DNAm Cross-reactivity"
+author: "Paul Hop"
+date: "9/1/2019"
+output: 
+  html_document:
+    code_folding: hide
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, cache = TRUE, cache.lazy = FALSE, warning=FALSE, message = FALSE)
+```
+
+```{r libraries, include = FALSE, cache = FALSE}
+library(tidyverse)
+library(ggsci)
+library(IlluminaHumanMethylation450kanno.ilmn12.hg19)
+library(FDb.InfiniumMethylation.hg19)
+library(pheatmap)
+library(magrittr)
+library(colorblindr)
+
+# Source EWAS functions
+source("../R/ewas_plot_functions.R")
+```
+
+```{r global_vars, include = FALSE, cache = FALSE}
+# Color palette
+scale_c9_match_pval_plots <- scale_color_OkabeIto()
+scale_diff_plots <- scale_color_OkabeIto(order = c(8,4,5,6,7,1,2,3))
+
+# Fig sizes for manuscript
+# text_size = 8
+# point_size = 1
+
+# Fig sizes for html
+text_size = 14
+point_size = 3
+```
+
+```{r data, include = FALSE, cache=FALSE}
+# MLMA results 
+mlma <- read_tsv("../data/output/ewas/mlma_loco_c9_covarsexbatch_qcovaragesmoking_missing0.05.loco.mlma")
+mlma_oob <- read_tsv("../data/output/ewas/mlma_moa_c9_covarsexbatch_qcovaragesmoking_oob.mlma")
+mlma <- mlma %>% dplyr::mutate(t = b / se)
+mlma_oob <- mlma_oob %>% 
+  dplyr::rename(p_oob = p) %>%
+  dplyr::mutate(t_oob = b / se)
+
+## Sensitivity analysees
+mlma_linear <- readr::read_tsv("../data/output/ewas/mlma_linear_c9_covarsexbatch_qcovaragesmokingcellcounts5controlPCs5PCs_missing0.05.linear")
+mlma_rmPCAoutliers <- readr::read_tsv("../data/output/ewas/mlma_loco_c9_covarsexbatch_qcovaragesmoking_missing0.05_rmPCAoutliers.loco.mlma")
+mlma_meta <- readr::read_tsv("../data/output/ewas/meta_analysis.tsv")
+mlma_mvalues <- readr::read_tsv("../data/output/ewas/mlma_loco_c9_covarsexbatch_qcovaragesmoking_missing0.05_mvalues.loco.mlma")
+mlma_linear <- mlma_linear %>% dplyr::mutate(t = b / se)
+mlma_rmPCAoutliers <- mlma_rmPCAoutliers %>% dplyr::mutate(t = b/se)
+mlma_meta <- mlma_meta %>% dplyr::mutate(t = b/se)
+mlma_mvalues <- mlma_mvalues %>% dplyr::mutate(t = b/se)
+PCA_outliers <- readr::read_tsv("../data/temp/PCA_outliers.txt", col_names = FALSE)
+
+
+# Samplesheet
+samplesheet <- readRDS("../data/raw/samplesheet_NL_cleaned.rds")
+samplesheet <- samplesheet %>% 
+  dplyr::filter(Inferred_C9_status %in% c("long", "wt"))
+samplesheet_raw <- readRDS("../data/raw/samplesheet_NL.rds")
+
+# Betas
+beta <- readRDS("../data/processed/beta_mlma_c9_loco_sig.rds")
+beta_oob <- readRDS("../data/processed/beta_oob_mlma_c9_moa_sig.rds")
+
+## EWAS on total intensities 
+total <- read_tsv("../data/output/ewas/mlma_linear_c9_covarsexbatch_qcovaragesmokingcellcounts5controlPCs5PCs_missing0.05_total_intensities.linear")
+total <- total %>% dplyr::mutate(t = b / se)
+
+# OOB total intensities
+total_oob <- read_tsv("../data/output/ewas/mlma_linear_c9_covarsexbatch_qcovaragesmokingcellcounts5controlPCs5PCs_total_intensities_oob.linear")
+total_oob <- total_oob %>% dplyr::mutate(t = b / se)
+
+# matches of 450k probes and C9 repeat
+matches_methylated_mismatch_indel_final <- readRDS("../data/processed/c9_matches/450k_matches_methylated_mismatch_indel_final.rds")
+matches_methylated_nomismatch_final <- readRDS("../data/processed/c9_matches/450k_matches_methylated_nomismatch_final_start1bp.rds")
+matches_unmethylated_nomismatch_final <- readRDS("../data/processed/c9_matches/450k_matches_unmethylated_nomismatch_final_start1bp.rds")
+matches_unmethylated_mismatch_indel_final <- readRDS("../data/processed/c9_matches/450k_matches_unmethylated_mismatch_indel_final.rds")
+matches_YpG_mismatch_indel_final <- readRDS("../data/processed/c9_matches/450k_matches_YpG_mismatch_indel_final.rds")
+matches_YpG_nomismatch_final <- readRDS("../data/processed/c9_matches/450k_matches_YpG_nomismatch_final_start1bp.rds")
+
+# Annotation
+anno <- as.data.frame(getAnnotation(IlluminaHumanMethylation450kanno.ilmn12.hg19))
+
+## Add p-values (normal + oob)
+matches_methylated_nomismatch_final <- matches_methylated_nomismatch_final %>% 
+  dplyr::left_join(mlma[,c("Probe", "p", "t")], by = "Probe") %>% 
+  dplyr::left_join(mlma_oob[,c("Probe", "p_oob", "t_oob")], by = "Probe")
+
+matches_methylated_nomismatch_final <- matches_methylated_nomismatch_final %>% 
+  dplyr::group_by(Probe) %>%
+  dplyr::filter(width == max(width)) %>%
+  dplyr::ungroup()
+
+matches_unmethylated_nomismatch_final <- matches_unmethylated_nomismatch_final %>% 
+  dplyr::left_join(mlma[,c("Probe", "p", "t")], by = "Probe") %>% 
+  dplyr::left_join(mlma_oob[,c("Probe", "p_oob", "t_oob")], by = "Probe")
+
+matches_methylated_mismatch_indel_final <- matches_methylated_mismatch_indel_final %>% 
+  dplyr::left_join(mlma[,c("Probe", "p", "t")], by = "Probe") %>% 
+  dplyr::left_join(mlma_oob[,c("Probe", "p_oob", "t_oob")], by = "Probe")
+
+matches_unmethylated_mismatch_indel_final <- matches_unmethylated_mismatch_indel_final %>%
+  dplyr::left_join(mlma[,c("Probe", "p", "t")], by = "Probe") %>% 
+  dplyr::left_join(mlma_oob[,c("Probe", "p_oob", "t_oob")], by = "Probe")
+
+matches_YpG_nomismatch_final <- matches_YpG_nomismatch_final %>% 
+  dplyr::left_join(mlma[,c("Probe", "p", "t")], by = "Probe") %>% 
+  dplyr::left_join(mlma_oob[,c("Probe", "p_oob", "t_oob")], by = "Probe")
+
+matches_YpG_mismatch_indel_final <- matches_YpG_mismatch_indel_final %>% 
+  dplyr::left_join(mlma[,c("Probe", "p", "t")], by = "Probe") %>% 
+  dplyr::left_join(mlma_oob[,c("Probe", "p_oob", "t_oob")], by = "Probe")
+
+## Add 'p_updated' column: if there is a predicted color channel switch, use the OOB p-value 
+add_color_info <- function(matches) {
+  matches %>% dplyr::mutate(
+    p_updated = case_when(
+      Color == "" ~ p,
+      predicted_color != Color ~ p_oob, 
+      TRUE ~p
+    ),
+  color_switch = case_when(
+      Color == "" ~ FALSE,
+      predicted_color != Color ~ TRUE, 
+      TRUE ~ FALSE
+    )
+  )
+}
+matches_methylated_nomismatch_final <- add_color_info(matches_methylated_nomismatch_final)
+matches_unmethylated_nomismatch_final <- add_color_info(matches_unmethylated_nomismatch_final)
+matches_methylated_mismatch_indel_final <- add_color_info(matches_methylated_mismatch_indel_final)
+matches_unmethylated_mismatch_indel_final <- add_color_info(matches_unmethylated_mismatch_indel_final)
+matches_YpG_nomismatch_final <- add_color_info(matches_YpG_nomismatch_final)
+matches_YpG_mismatch_indel_final <- add_color_info(matches_YpG_mismatch_indel_final)
+
+## Did not run algorithm starting from 1 bp for mismatch/INDEL (computationally intensive)
+## However, since mismatches/INDELs are allowed >5bp, the matches <5bp should be
+## the same as when not allowing mismatches/INDELs
+matches_methylated_nomismatch_final_max5 <- matches_methylated_nomismatch_final %>%
+  dplyr::filter(width <= 5)
+matches_methylated_nomismatch_final_max5 <- matches_methylated_nomismatch_final_max5 %>%
+  dplyr::filter(!Probe %in% matches_methylated_mismatch_indel_final$Probe)
+matches_methylated_mismatch_indel_final <- dplyr::bind_rows(matches_methylated_nomismatch_final_max5, matches_methylated_mismatch_indel_final)
+
+matches_unmethylated_nomismatch_final_max5 <- matches_unmethylated_nomismatch_final %>%
+  dplyr::filter(width <= 5)
+matches_unmethylated_nomismatch_final_max5 <- matches_unmethylated_nomismatch_final_max5 %>%
+  dplyr::filter(!Probe %in% matches_unmethylated_mismatch_indel_final$Probe)
+matches_unmethylated_mismatch_indel_final <- dplyr::bind_rows(matches_unmethylated_nomismatch_final_max5, matches_unmethylated_mismatch_indel_final)
+
+matches_YpG_nomismatch_final_max5 <- matches_YpG_nomismatch_final %>%
+  dplyr::filter(width <= 5)
+matches_YpG_nomismatch_final_max5 <- matches_YpG_nomismatch_final_max5  %>%
+  dplyr::filter(!Probe %in% matches_YpG_mismatch_indel_final$Probe)
+matches_YpG_mismatch_indel_final <- dplyr::bind_rows(matches_YpG_nomismatch_final_max5, matches_YpG_mismatch_indel_final)
+
+
+### Define cis/trans associations (<100kb)
+mlma <- mlma %>%
+  dplyr::mutate(cistrans = dplyr::case_when(
+    Chr == 9 & bp > 27573527-100000 & bp < 27573544 + 100000 ~ "cis",
+    TRUE ~ "trans"
+  )) %>%
+  dplyr::mutate(cistrans = factor(cistrans, levels = c("trans", "cis")))
+
+matches_methylated_nomismatch_final <- matches_methylated_nomismatch_final %>%
+  dplyr::left_join(mlma[,c("Probe", "cistrans")], by = "Probe")
+
+matches_methylated_mismatch_indel_final <- matches_methylated_mismatch_indel_final %>%
+  dplyr::left_join(mlma[,c("Probe", "cistrans")], by = "Probe")
+
+matches_unmethylated_nomismatch_final <- matches_unmethylated_nomismatch_final %>%
+  dplyr::left_join(mlma[,c("Probe", "cistrans")], by = "Probe")
+
+matches_unmethylated_mismatch_indel_final <- matches_unmethylated_mismatch_indel_final %>%
+  dplyr::left_join(mlma[,c("Probe", "cistrans")], by = "Probe")
+
+matches_YpG_nomismatch_final <- matches_YpG_nomismatch_final %>%
+  dplyr::left_join(mlma[,c("Probe", "cistrans")], by = "Probe")
+
+matches_YpG_mismatch_indel_final <- matches_YpG_mismatch_indel_final %>%
+  dplyr::left_join(mlma[,c("Probe", "cistrans")], by = "Probe")
+
+### Significant sites
+mlma_sig <- mlma %>% dplyr::filter(p < 0.05/nrow(.))
+mlma_oob_sig <- mlma_oob %>% dplyr::filter(p_oob < 0.05/nrow(.))
+
+```
+
+## Data 
+
+For the discovery analyses we used Dutch DNA methylation data (450k) consisting of `r nrow(samplesheet)` samples and 467,542 CpG-sites after QC and removing XY probes. 
+The data was normalized using the `dasen()` function.
+
+We performed an EWAS on C9 status, within the `r nrow(samplesheet %>% dplyr::filter(Pheno == 2))` cases.  
+Overview of C9 status within cases (based on ExpansionHunter): 
+
+```{r nr_c9}
+knitr::kable(samplesheet %>%
+  dplyr::filter(Pheno == 2) %>%
+  dplyr::mutate(ifelse(Pheno == 2, "ALS", Pheno)) %>%
+  dplyr::count(Inferred_C9_status), format = "html") %>%
+  kableExtra::kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+```
+
+Overview study population:
+
+```{r overview_study_population}
+pop <- samplesheet %>% 
+  dplyr::filter(Pheno == 2, !is.na(Inferred_C9_status)) %>%
+  dplyr::group_by(Pheno) %>%
+  dplyr::summarize(
+    nr_subjects = n(),
+    male = sum(Sex == 2),
+    male_percentage = mean(Sex == 2),
+    age = median(Predicted_Age),
+    age_interquartile_low = quantile(Predicted_Age, 1/4),
+    age_interquartile_high = quantile(Predicted_Age, 3/4),
+    C9_carrier = sum(Inferred_C9_status == "long"),
+    C9_carrier_percentage = mean(Inferred_C9_status == "long")
+  ) %>%
+  dplyr::group_by(Pheno) %>%
+  dplyr::mutate(male = sprintf("%s (%s)", male, round(male_percentage, 2)),
+                age = sprintf("%s (%s-%s)", round(age,1), round(age_interquartile_low, 1), round(age_interquartile_high, 1)),
+                C9_status = sprintf("%s (%s)", C9_carrier, round(C9_carrier_percentage, 3))) %>%
+  dplyr::select(Pheno, nr_subjects, male, age, C9_status)
+pop <- t(pop)
+col <- pop[1,]
+pop <- pop[2:nrow(pop),]
+pop <- as.data.frame(pop)
+colnames(pop) <- col
+
+knitr::kable(pop, format = "html") %>%
+  kableExtra::kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+```
+
+## EWAS
+
+We performed an epigenome-wide association study on *C9orf72* expansion status
+within ALS cases using a mixed linear model as implemented in the OSCA software.
+Briefly, this algorithm tests for an association between the methylation status of a CpG-site (beta-value) and
+a trait (in this case *C9orf72* status) while fitting all the other distal probes as random effects.
+Fitting the distal probes as random effects accounts for effects of unobserved confounders and correlations between
+distal probes induced by confounding factors.
+Specifically, we used the 'LOCO' option, which excludes all probes located on the same chromosome as the
+target site from the random effects terms so that the target site is not fitted twice (once as a fixed effect and once as a random effect).
+
+We included sex, experimental batch, predicted age and predicted smoking score as fixed covariates in the model.
+
+
+### QQ-plot
+
+The QQ-plot looks well-behaved.
+
+```{r qqplot}
+qqplot <- gg_qqplot(pval = mlma$p, show_lambda = TRUE, ci = 0.95, 
+                    cut = TRUE, text_size = text_size + 1, point_size = point_size)
+qqplot
+```
+
+### Manhattan plot
+
+`r nrow(mlma_sig)` CpGs are significant after correction for multiple testing (*P* < 1.1 * 10^-7).  
+Although several probes are located in chromosome 9, there are also several *trans* effects:
+
+```{r manhattan}
+manhattan <- gg.manhattan(mlma, array = "450k", annotate_stats = anno, 
+                          text_size = text_size, point_size = point_size)
+manhattan
+```
+
+### Sensitivity checks 
+
+The following sensitivity checks were performed:  
+1. Removing PCA outliers prior to the analysis. (>3 SDs from the mean of the first five principal components)  
+2. Running an inverse-weighted fixed-effects meta-analysis on the three experimental batches instead of a combined analysis. The same algorithm + covariates were used as in the combined analysis.  
+3. Running a multivariate linear model adjusting for Batch, Age, Sex, Smoking score, imputed cell fractions, the first 5 array-wide PCs and the first 5 control probe PCs.  
+4. Using M-values instead of beta-values  
+
+#### Removed PCA outliers
+
+`r sum((samplesheet %>% dplyr::filter(Pheno == 2, !is.na(Inferred_C9_status))) %$% Sample_Name %in% PCA_outliers$X1)` samples were removed based on a 3sd cutoff on the first five PCs. 
+
+T-statistic comparison:
+
+```{r rmPCAoutliers}
+compare_rmPCAoutliers <- compare_tstats(mlma, mlma_rmPCAoutliers, 
+                           label1 = "- Main Analysis", label2 = "- Removed PCA outliers",
+                           highlight_sig = FALSE, text_size = text_size, point_size = point_size) 
+compare_rmPCAoutliers
+```
+
+#### Linear model 
+
+Multivariate linear model adjusting for Batch, Age, Sex, Smoking score, imputed cell fractions,
+the first 5 array-wide PCs and the first 5 control probe PCs.
+  
+```{r linearmodel}
+compare_linear <- compare_tstats(mlma, mlma_linear, 
+                           label1 = "- Main Analysis", label2 = "- Linear model",
+                           highlight_sig = FALSE, text_size = text_size, point_size = point_size) 
+compare_linear
+```
+
+#### Meta analysis
+
+Inverse-weighted fixed-effects meta-analysis:
+```{r meta_analysis}
+compare_meta <- compare_tstats(mlma, mlma_meta, 
+                           label1 = "- Main Analysis", label2 = "- Meta-Analysis",
+                           highlight_sig = FALSE, text_size = text_size, point_size = point_size) 
+compare_meta
+```
+
+#### Mvalues
+
+Using M-values instead of beta-values
+
+```{r mvalues}
+compare_mvalues <- compare_tstats(mlma, mlma_mvalues, 
+                           label1 = "- Main Analysis", label2 = "- Mvalues",
+                           highlight_sig = FALSE, text_size = text_size, point_size = point_size) 
+compare_mvalues
+```
+
+### Correlation among significant probes 
+
+Correlation among significant probes within the c9 carriers:
+
+```{r heatmap}
+# Subset of the beta-matrix (significant probes)
+samplesheet_c9mutated <- samplesheet %>% dplyr::filter(Inferred_C9_status == "long")
+beta_ <- beta[mlma_sig$Probe,samplesheet_c9mutated$Sample_Name]
+
+# # Heatmap
+pal <- viridis::viridis(n = 200)
+breaksList = seq(-1,1, by = 0.01)
+heatmap <- pheatmap(cor(t(beta_), use = "complete.obs"),
+                            color = pal,
+                            breaks = breaksList,
+                            filename = "../data/output/figs/heatmap_c9_loco_sig.pdf",
+                            width = 3, height = 4,
+                            fontsize = 5)
+```
+
+```{r, out.width = "600px"}
+knitr::include_graphics("../data/output/figs/heatmap_c9_loco_sig.pdf")
+```
+
+### Locus plots
+
+#### C9 island
+
+Probes within 10,000bp of the C9 repeat:
+
+```{r regional_pvalues}
+fdb <- features(FDb.InfiniumMethylation.hg19)
+fdb <- fdb[!is.na(fdb$channel450),] # Select 450k probes```
+fdb <- fdb[mlma$Probe,]
+#
+fdb$p <- mlma$p
+fdb$logp <- -log10(fdb$p)
+fdb$b <- mlma$b
+# Select probes near repeat 
+# Repeat location: 27573523:27573541
+mlma_sig_c9 <- mlma_sig %>% dplyr::filter(Chr == 9, bp > (27573523-10000), bp < (27573541 + 10000))
+mlma_sig_trans <- mlma_sig %>% dplyr::filter(!Probe %in% mlma_sig_c9$Probe)
+mlma_sig_trans_nochr9 <- mlma_sig %>% dplyr::filter(Chr != 9)
+mlma_sig_trans_chr9 <- mlma_sig_trans %>% dplyr::filter(Chr == 9)
+plots_c9 <- purrr::map(mlma_sig_c9$Probe[1], .f = plot_pvalues_DMPs, windowsize = 10000, DMPs = fdb, 
+                       correlation_plot=FALSE, text_size = text_size, point_size = point_size)
+names(plots_c9) <- mlma_sig_c9$Probe[1]
+plots_c9[[1]]
+```
+
+#### Other probes on chromosome 9
+
+```{r regional_pvalues_trans_chr9}
+plots_trans_chr9 <- purrr::map(mlma_sig_trans_chr9$Probe, .f = plot_pvalues_DMPs, windowsize = 10000, DMPs = fdb, correlation_plot=FALSE, text_size = text_size, point_size = point_size)
+names(plots_trans_chr9) <- mlma_sig_trans_chr9$Probe
+cowplot::plot_grid(plotlist = plots_trans_chr9, nrow = ceiling(length(plots_trans_chr9)/2))
+```
+
+#### Trans probes 
+
+*Trans* probes seem to be mostly 'lonely' associations:
+
+```{r regional_pvalues_trans_1}
+plots_trans_nochr9 <- purrr::map(mlma_sig_trans_nochr9$Probe, .f = plot_pvalues_DMPs, windowsize = 10000, DMPs = fdb, correlation_plot=FALSE, text_size = text_size, point_size = point_size)
+names(plots_trans_nochr9) <- mlma_sig_trans_nochr9$Probe
+cowplot::plot_grid(plotlist = plots_trans_nochr9[1:4], nrow = 2)
+```
+
+```{r regional_pvalues_trans_2}
+plots_trans_nochr9 <- purrr::map(mlma_sig_trans_nochr9$Probe, .f = plot_pvalues_DMPs, windowsize = 10000, DMPs = fdb, correlation_plot=FALSE, text_size = text_size, point_size = point_size)
+names(plots_trans_nochr9) <- mlma_sig_trans_nochr9$Probe
+cowplot::plot_grid(plotlist = plots_trans_nochr9[5:8], nrow = 2)
+```
+
+```{r regional_pvalues_trans_3}
+plots_trans_nochr9 <- purrr::map(mlma_sig_trans_nochr9$Probe, .f = plot_pvalues_DMPs, windowsize = 10000, DMPs = fdb, correlation_plot=FALSE, text_size = text_size, point_size = point_size)
+names(plots_trans_nochr9) <- mlma_sig_trans_nochr9$Probe
+cowplot::plot_grid(plotlist = plots_trans_nochr9[8:10], nrow = 2)
+```
+
+### Probe sequences
+
+*Trans* effects have suspicious probe sequences:
+
+```{r probe_sequences}
+probe_sequences <- anno %>% 
+  dplyr::filter(Name %in% mlma_sig_trans_nochr9$Probe) %>%
+  dplyr::select(Name, chr, pos, Type, ProbeSeqA, ProbeSeqB) %>%
+  dplyr::arrange(Type)
+
+probe_sequences_ <- probe_sequences %>% dplyr::select(-c(chr, pos, ProbeSeqA)) %>%
+  dplyr::rename(Probe = Name, ProbeSeq = ProbeSeqB) 
+knitr::kable(probe_sequences, format = "html") %>%
+  kableExtra::kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+```
+
+## C9 repeat matches 
+
+### Identifying probes that map to the bisulfite-converted C9 repeat
+
+See the 'analysis/c9_matches' folder for scripts used to find matches between all 450k/EPIC probe sequences and the C9 repeat sequence.
+We generated the forward and reverse strand of the GGGGCC hexanucleotide repeat *in silico*.
+Although the number of repeats differs per carrier, we used a fixed number of 10 repeats (60bp), which is sufficient for the full 50-nt sequence of a probe to match.
+Both strands were bisulfite-converted *in silico*, were all non-CpG cytosines were converted in T’s and Cs in CpG-sites were converted into Ts or Cs depending on the assumed methylation state, or were represented by Ys to allow any combination of methylation states. We then generated the complement strands of the bisulfite-converted strands, resulting in four strands in total (forward, reverse, forward complement, reverse complement). For each width between 1 and 50 bp we scanned the 3'-subsequence of the probe's sequence for a match with the four bisulfite-converted hexanucleotide repeat strands using the *Biostrings* package in R. 
+
+
+### C9 match length vs EWAS *P*-values
+
+First we assumed that the repeat is fully methylated, and scanned for a match between all 450k probes and the bisulfite-converted C9 repeat. We first focus on Type I probes (Type II probes are shown later).
+
+Plot comparing C9 match and *P*-values from C9 EWAS:
+
+```{r plot_nomismatch_noindel_typeI}
+plot_typeI_nomismatch_noindel_correlated_methylated <- matches_methylated_nomismatch_final %>% 
+  dplyr::filter(Type == "I") %>%
+  dplyr::filter(!is.na(cistrans)) %>% 
+  ggplot(aes(x = width, y = -log10(p), shape = cistrans)) +
+  geom_point(size=point_size, alpha = 1) + 
+  theme_classic() +
+  geom_hline(yintercept = -log10(0.05/nrow(mlma)), linetype = "dashed") + 
+  theme(text = element_text(size = text_size),
+        legend.position = "none") + 
+  xlab("C9 repeat match (bp)") +
+  ylab(bquote(-log[10](P)~" C9 EWAS"))
+
+plot_typeI_nomismatch_noindel_correlated_methylated + theme(legend.position="right", legend.title = element_blank())
+```
+
+This figure shows that several significant probes show a partial match with the BS-converted C9 repeat. However:  
+  
+1. Not all probes with a considerable match are associated with C9 status.  
+2. Some probes with a limited match are strongly associated with C9 status.
+
+We'll address both these observations in the following sections.
+
+#### Channel-switching
+
+Both the 450k and EPIC DNA methylation beadchip use a combination of two probe designs, named 'Type I' and 'Type II' probes.  
+**Type I probes**: Type I probes consist of two beads per CpG-site: one 'methylated' bead and one 'unmethylated' bead, designed to measure either a converted or an unconverted C-site respectively (see figure below). Both bead types will incorporate the same labeled nucleotide after hybridization (which matches the nucleotide preceding the CpG-site) and are thus measured **in the same color channel**. Therefore, for each type I probe there is one unused color-channel called the **out-of-band color channel (OOB)** which should only measure noise.  
+**Type II probes**: Type II probes consist of one bead per CpG-site. Here the methylation state is detected by single base extension: a 'T' nucleotide is incorporated when the C-site was unmethylated, and a 'G' nucleotide will be incorporated if the C-site was methylated. Thus, the type II technology uses **both color channels**: the green channel measures methylated signal and the red channel measures unmethylated signal. 
+
+```{r probe_technique, out.width = "600px"}
+knitr::include_graphics("../data/extdata/probe_types.png")
+```
+
+
+**Channel Switch**: Since the nucleotide that is incorporated in type I probes depends on the base preceding the CpG-site, cross-hybridization to a different region can lead to a color-channel switch if a different nucleotide precedes the CpG-site at that location. *We suspected that probes having a considerable match with the C9-repeat, but do not show any association, may be caused by cross-reactive signal ending up in the opposite (OOB) color-channel*.  
+  
+For each probe we predicted whether there would be a color-channel switch if the probe (partially) maps to the C9-repeat. Several of the probes with a partial match to the C9 repeat but with no significant association in the C9 EWAS, are indeed predicted to have a color-channel switch upon hybridization to the C9 repeat:
+
+```{r plot_nomismatch_noindel_typeI_colorswitch}
+plot_typeI_nomismatch_noindel_correlated_methylated_coloredswitch <- matches_methylated_nomismatch_final %>% 
+  dplyr::filter(Type == "I") %>%
+  dplyr::filter(!is.na(cistrans)) %>%
+  dplyr::mutate(color_switch = factor(ifelse(color_switch, "Color Switch", "No Color Switch"), 
+                                      levels = c("No Color Switch", "Color Switch"))) %>%
+  ggplot(aes(x = width, y = -log10(p), color = color_switch, shape = cistrans)) +
+  geom_point(size=point_size, alpha=1) + 
+  theme_classic() +
+  geom_hline(yintercept = -log10(0.05/nrow(mlma)), linetype = "dashed") + 
+  theme(text = element_text(size = text_size),
+        legend.title = element_blank(),
+        legend.position = "none") +
+  scale_c9_match_pval_plots + 
+  xlab("C9 repeat match (bp)") +
+  ylab(bquote(-log[10](P)~" C9 EWAS"))
+
+# # ## Plot with legend
+# plot_typeI_nomismatch_noindel_correlated_methylated_coloredswitch <- matches_methylated_nomismatch_final %>%
+#   arrange(p) %>%
+#   head(50) %>%
+#   dplyr::filter(Type == "I") %>%
+#   dplyr::mutate(color_switch = factor(ifelse(color_switch, "Color Switch", "No Color Switch"),
+#                                       levels = c("No Color Switch", "Color Switch"))) %>%
+#   ggplot(aes(x = width, y = -log10(p), color = color_switch)) +
+#   geom_point(size=point_size, alpha=1) +
+#   theme_classic() +
+#   geom_hline(yintercept = -log10(0.05/nrow(mlma)), linetype = "dashed") +
+#   theme(text = element_text(size = text_size),
+#         legend.title = element_blank(),
+#         legend.background = element_blank(),
+#         legend.box.background = element_rect(colour = "black")) +
+#   scale_c9_match_pval_plots +
+#   xlab("C9 repeat match (bp)") +
+#   ylab(bquote(-log[10](P)~" C9 EWAS"))
+
+plot_typeI_nomismatch_noindel_correlated_methylated_coloredswitch + theme(legend.position="right", legend.title = element_blank())
+```
+
+#### OOB EWAS
+
+We then performed an EWAS on beta-values calculated using the intensities in the out-of-band (OOB) color channels. Interestingly, the OOB-channels *should only measure background signal*, we do however find several genome-wide significant associations:
+
+##### OOB Manhattan plot
+
+```{r manhattan_oob}
+manhattan_oob <- gg.manhattan(mlma_oob %>% dplyr::rename(p = p_oob), array = "450k", annotate_stats = anno, text_size = text_size, point_size = point_size)
+manhattan_oob
+```
+
+##### OOB QQ-plot
+
+```{r qqplot_oob}
+qqplot_oob <- gg_qqplot(pval = mlma_oob %>% dplyr::rename(p = p_oob) %$% p, show_lambda = TRUE, ci = 0.95, 
+                    cut = TRUE, text_size = text_size + 1, point_size = point_size)
+
+qqplot_oob
+```
+
+Here we plot the C9 match length vs. the *P*-values from the C9 EWAS, where we used the OOB EWAS *P*-value in case of a predicted color-channel switch. The C9-mapping probes with a predicted color-channel switch indeed show significant OOB *P*-values:
+
+```{r plot_nomismatch_noindel_typeI_oobpvalues}
+plot_typeI_nomismatch_noindel_correlated_methylated_oobpvalues <- matches_methylated_nomismatch_final %>% 
+  dplyr::filter(Type == "I") %>%
+  dplyr::filter(!is.na(cistrans)) %>%
+   dplyr::mutate(color_switch = factor(ifelse(color_switch, "Color Switch", "No Color Switch"), 
+                                      levels = c("No Color Switch", "Color Switch"))) %>%
+  ggplot(aes(x = width, y = -log10(p_updated), color = color_switch, shape = cistrans)) +
+  geom_point(size=point_size, alpha=1) +
+  theme_classic() +
+  geom_hline(yintercept = -log10(0.05/nrow(mlma)), linetype = "dashed") +
+  theme(text = element_text(size = text_size),
+        legend.title = element_blank(),
+       legend.position = "None") +
+  xlab("C9 repeat match (bp)") +
+  ylab(bquote(-log[10](P_updated)~" C9 EWAS")) +
+  scale_c9_match_pval_plots 
+
+plot_typeI_nomismatch_noindel_correlated_methylated_oobpvalues + theme(legend.position="right", legend.title = element_blank())
+```
+
+### Allowing mismatches/INDELs
+
+Here we test whether the probes that are associated with C9 status, but *do not* show a match with the C9 repeat, do have a considerable match when we allow a mismatch/INDEL (>5bp from the 3' end of the probe):
+
+```{r diff_allow_mismatch_indel}
+diff_methylated_nomismatch_mismatch_indel <- matches_methylated_nomismatch_final %>%
+  dplyr::filter(Type2 == "I_Methylated") %>%
+  dplyr::left_join(matches_methylated_mismatch_indel_final %>% dplyr::filter(Type2 %in% c("I_Methylated")) %>% dplyr::select(Probe, Type2, width),by = "Probe") %>%
+  dplyr::mutate(diff = width.y-width.x) %>%
+  dplyr::mutate(pvalue = dplyr::case_when(
+    p_updated < 1e-16 ~ "<1e-16",
+    p_updated > 1e-16 & p_updated < 1e-7 ~ "<1e-7",
+    p_updated > 1e-7 ~ ">1e-7",
+    TRUE ~ NA_character_
+  ))
+
+max <- max(c(diff_methylated_nomismatch_mismatch_indel$width.x, diff_methylated_nomismatch_mismatch_indel$width.y), na.rm = TRUE)
+
+diff_plot_nomismatch_mismatch_indel <- diff_methylated_nomismatch_mismatch_indel %>%
+  dplyr::filter(!is.na(cistrans)) %>%
+  dplyr::filter(!is.na(pvalue)) %>%
+  dplyr::mutate(pvalue = factor(pvalue, levels = c(">1e-7", "<1e-7", "<1e-16"))) %>%
+  ggplot(aes(x = width.x, y = width.y, color = pvalue, shape = cistrans)) +
+  geom_point(size = point_size, alpha=1) +
+  geom_point(data = diff_methylated_nomismatch_mismatch_indel %>% dplyr::filter(pvalue == "<1e-7"), size = point_size, alpha = 1) +
+  geom_point(data = diff_methylated_nomismatch_mismatch_indel %>% dplyr::filter(pvalue == "<1e-16"), size = point_size, alpha = 1) +
+  theme_classic() +
+  xlim(1, max) +
+  ylim(1, max) +
+  theme(text = element_text(size = text_size),
+         legend.position = "None") +
+  scale_diff_plots +
+  xlab("Exact C9 Match Length (bp)") +
+  ylab("Inexact C9 match Length (bp)") 
+
+## Legend 
+diff_plot_nomismatch_mismatch_indel_legend <- diff_methylated_nomismatch_mismatch_indel %>%
+  dplyr::filter(!is.na(cistrans)) %>%
+  dplyr::filter(!is.na(pvalue)) %>%
+  dplyr::arrange(p) %>%
+  head(1000) %>%
+  dplyr::mutate(pvalue = factor(pvalue, levels = c(">1e-7", "<1e-7", "<1e-16"))) %>%
+  ggplot(aes(x = width.x, y = width.y, color = pvalue, shape = cistrans)) +
+  geom_point(size = point_size, alpha=1) +
+  theme_classic() +
+  xlim(1, max) +
+  ylim(1, max) +
+  theme(text = element_text(size = text_size)) +
+  scale_diff_plots +
+  xlab("Exact C9 Match Length (bp)") +
+  ylab("Inexact C9 match Length (bp)") 
+
+diff_plot_nomismatch_mismatch_indel + theme(legend.position="right", legend.title = element_blank())
+```
+
+Updated previous plots with match length when allowing 1 mismatch/INDEL:
+
+```{r plot_mismatch_indel_typeI_oobpvalues}
+plot_typeI_mismatch_indel_correlated_methylated_oobpvalues <- matches_methylated_mismatch_indel_final %>% 
+  dplyr::filter(Type == "I") %>%
+   dplyr::filter(!is.na(cistrans)) %>%
+   dplyr::mutate(color_switch = factor(ifelse(color_switch, "Color Switch", "No Color Switch"), 
+                                      levels = c("No Color Switch", "Color Switch"))) %>%
+  ggplot(aes(x = width, y = -log10(p_updated), color = color_switch, shape = cistrans)) +
+  geom_point(size=point_size, alpha=1) + 
+  theme_classic() +
+  geom_hline(yintercept = -log10(0.05/nrow(mlma)), linetype = "dashed") +
+  theme(text = element_text(size = text_size),
+         legend.background = element_blank(),
+        legend.position = "None") +
+  xlab("C9 repeat inexact match (bp)") +
+  ylab(bquote(-log[10](P_updated)~" C9 EWAS")) +
+  scale_c9_match_pval_plots
+
+plot_typeI_mismatch_indel_correlated_methylated_oobpvalues + theme(legend.position="right", legend.title = element_blank())
+```
+
+
+### Direction of effect 
+
+All cross-reactive probes show a positive effect size, suggesting that the repeat is hypermethylated in carriers, which is consistent with literature:
+
+```{r tstats}
+## T-stat plot
+plot_typeI_mismatch_indel_methylated_tstat <- matches_methylated_mismatch_indel_final %>% 
+  dplyr::filter(Type == "I") %>%
+   dplyr::mutate(t_updated = case_when(
+    Color == "" ~ t,
+    predicted_color != Color ~ t_oob, 
+    TRUE ~ t
+  )) %>% 
+  dplyr::filter(!is.na(cistrans)) %>%
+  dplyr::mutate(color_switch = factor(ifelse(color_switch, "Color Switch", "No Color Switch"), 
+                                      levels = c("No Color Switch", "Color Switch"))) %>%
+  ggplot(aes(x = width, y = t_updated, color = color_switch, shape = cistrans)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey") +
+  geom_point(size=point_size, alpha=1) + 
+  theme_classic() +
+  theme(text = element_text(size = text_size),
+         legend.title = element_blank(),
+         legend.background = element_blank(),
+         legend.box.background = element_rect(colour = "black"),
+        legend.position = "none") +
+  xlab("C9 repeat inexact match (bp)") +
+  ylab("T-statistic C9 EWAS") +
+  scale_c9_match_pval_plots 
+
+plot_typeI_mismatch_indel_methylated_tstat + theme(legend.position="right", legend.title = element_blank())
+```
+
+### Type II probes
+
+Type II probes, not allowing a mismatch/INDEL:
+
+```{r plot_nomismatch_noindel_typeII}
+plot_typeII_nomismatch_noindel_correlated_methylated <- matches_methylated_nomismatch_final %>% 
+  dplyr::filter(Type == "II") %>%
+  dplyr::filter(!is.na(cistrans)) %>%
+  ggplot(aes(x = width, y = -log10(p), shape = cistrans)) +
+  geom_point(size=point_size, alpha=1) + 
+  theme_classic() +
+  geom_hline(yintercept = -log10(0.05/nrow(mlma)), linetype = "dashed") +
+  theme(text = element_text(size = text_size),
+         legend.title = element_blank(),
+         legend.background = element_blank(),
+         legend.box.background = element_rect(colour = "black"),
+         legend.position = "none") + 
+  xlab("C9 repeat exact match (bp)") +
+  ylab(bquote(-log[10](P)~" C9 EWAS")) 
+
+plot_typeII_nomismatch_noindel_correlated_methylated + theme(legend.position="right", legend.title = element_blank())
+```
+
+Type II probes, allowing a mismatch/INDEL (>5bp from 3'end of probe):
+
+```{r plot_mismatch_indel_typeII}
+plot_typeII_mismatch_indel_correlated_methylated <- matches_methylated_mismatch_indel_final %>% 
+  dplyr::filter(Type == "II") %>%
+  dplyr::filter(!is.na(cistrans)) %>%
+  ggplot(aes(x = width, y = -log10(p), shape = cistrans)) +
+  geom_point(size=point_size, alpha=1) + 
+  theme_classic() +
+  geom_hline(yintercept = -log10(0.05/nrow(mlma)), linetype = "dashed") +
+  theme(text = element_text(size = text_size),
+        legend.position="none") + 
+  xlab("C9 repeat inexact match (bp)") +
+  ylab(bquote(-log[10](P)~" C9 EWAS")) 
+
+plot_typeII_mismatch_indel_correlated_methylated + theme(legend.position="right", legend.title = element_blank())
+```
+
+```{r save_legends, include = FALSE}
+## T-stat plot
+legend <- matches_methylated_mismatch_indel_final %>% 
+  dplyr::filter(Type == "I") %>%
+   dplyr::mutate(t_updated = case_when(
+    Color == "" ~ t,
+    predicted_color != Color ~ t_oob, 
+    TRUE ~ t
+  )) %>% 
+  dplyr::filter(!is.na(cistrans)) %>%
+  arrange(p_updated) %>%
+  head(1000) %>%
+  dplyr::mutate(color_switch = factor(ifelse(color_switch, "Color Switch", "No Color Switch"), 
+                                      levels = c("No Color Switch", "Color Switch"))) %>%
+  ggplot(aes(x = width, y = t_updated, color = color_switch, shape = cistrans)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey") +
+  geom_point(size=point_size, alpha=1) + 
+  theme_classic() +
+  theme(text = element_text(size = text_size),
+         legend.title = element_blank(),
+         legend.background = element_blank()) +
+        # legend.box.background = element_rect(colour = "black")) +
+  xlab("C9 repeat inexact match (bp)") +
+  ylab("T-statistic C9 EWAS") +
+  scale_c9_match_pval_plots 
+
+legend
+```
+
+### Enrichment of C9-mapping probes
+
+```{r crossreactive_probes}
+## C9-mapping probes based on a >=14bp cutoff 
+
+# Assume methylated
+matches_methylated_nomismatch_final_14 <- matches_methylated_nomismatch_final %>% dplyr::filter(width >=14)
+matches_methylated_mismatch_indel_final_14 <- matches_methylated_mismatch_indel_final %>% dplyr::filter(width >=14)
+
+# Assume unmethylated
+matches_unmethylated_nomismatch_final_14 <- matches_unmethylated_nomismatch_final %>% dplyr::filter(width >=14)
+matches_unmethylated_mismatch_indel_final_14 <- matches_unmethylated_mismatch_indel_final %>% dplyr::filter(width >=14)
+
+# Lists of probes 
+crossreactive_probes_methylated <- unique(matches_methylated_mismatch_indel_final_14$Probe)
+crossreactive_probes_unmethylated <- unique(matches_unmethylated_mismatch_indel_final_14$Probe)
+crossreactive_probes_combined <- unique(c(matches_methylated_mismatch_indel_final_14$Probe, matches_unmethylated_mismatch_indel_final_14$Probe))
+```
+
+We checked which probes remain after removing probes with a >=14bp match to the C9 repeat (allowing 1 mismatch/INDEL), removing `r length(crossreactive_probes_methylated)` probes. 
+All except one of *trans* probes cross-hybridize C9 region:
+
+```{r manhattan_hlightcrossreactive}
+manhattan_hlightcrossreactive <- gg.manhattan(mlma, array = "450k", annotate_stats = anno, text_size = text_size, point_size = point_size, hlight = crossreactive_probes_methylated)
+manhattan_hlightcrossreactive
+```
+
+For the OOB EWAS, 1 probe remains after removing cross-reactive probes based on a >=14bp match to the C9 repeat:
+
+```{r manhattan_hlightcrossreactive_oob}
+manhattan_oob_hlightcrossreactive <- gg.manhattan(mlma_oob %>% dplyr::rename(p = p_oob), array = "450k", annotate_stats = anno, text_size = text_size, point_size = point_size, hlight = crossreactive_probes_methylated)
+manhattan_oob_hlightcrossreactive
+```
+
+This probe would have a 14bp match when we would have allowed a mismatch <5bp of the 3'end of the probe (4th position), suggesting that even with mismatches <5bp of the 3'-end of the probe, detectable cross-hybridization can occur:  
+
+```{r surviving_trans_probe_oob}
+knitr::kable(anno %>% 
+  dplyr::filter(Name %in% mlma_oob_sig$Probe & !Name %in% crossreactive_probes_methylated) %>%
+  dplyr::select(Name, chr, pos, Type, ProbeSeqA, ProbeSeqB) %>%
+  dplyr::arrange(Type), format = "html") %>%
+  kableExtra::kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
+```
+
+#### Enrichment C9-mapping probes 
+
+Number of cross-reactive probes among significant probes:
+
+```{r tab_crossreactive_methylated}
+tab <- matrix(c(length(intersect(mlma_sig$Probe, crossreactive_probes_methylated)), nrow(mlma %>% dplyr::filter(!Probe %in% c(mlma_sig$Probe)) %>% dplyr::filter(Probe %in% crossreactive_probes_methylated)) ,
+                   length(setdiff(mlma_sig$Probe, crossreactive_probes_methylated)), nrow(mlma %>% dplyr::filter(!Probe %in% c(mlma_sig$Probe, crossreactive_probes_methylated)))), nrow=2)
+rownames(tab) <- c("Significant", "Not Significant")
+colnames(tab) <- c("Cross-reactive", "Not Cross-reactive")
+tab 
+```
+
+Fisher's exact test:
+
+```{r fisher_test_crossreactive_methylated}
+fisher.test(tab)
+fisher.test(tab)$p.value
+```
+
+We do note that the chosen 14bp cutoff is data-driven and could therefore be could therefore be biased (the cutoff was based on the observation that most significant trans probes have ≥14bp match to the C9 repeat). However, we found that for a range of cut-offs, the significant probes from the C9 EWAS were enriched for probes with longer matches to the C9 repeat:
+
+```{r enrichments}
+## Check enrichment of C9-mapping probes among significant sites for different cutoffs 
+check_enrichment = function(cutoff) {
+  matches_methylated_nomismatch_final_cutoff <- matches_methylated_nomismatch_final %>% dplyr::filter(width >= cutoff)
+  matches_methylated_mismatch_indel_final_cutoff <- matches_methylated_mismatch_indel_final %>% dplyr::filter(width >= cutoff)
+  
+  crossreactive_probes <- unique(c(matches_methylated_nomismatch_final_cutoff$Probe, matches_methylated_mismatch_indel_final_cutoff$Probe))
+    tab <- matrix(c(length(intersect(mlma_sig$Probe, crossreactive_probes)), nrow(mlma %>% dplyr::filter(!Probe %in% c(mlma_sig$Probe)) %>% dplyr::filter(Probe %in% crossreactive_probes)) ,
+                     length(setdiff(mlma_sig$Probe, crossreactive_probes)), nrow(mlma %>% dplyr::filter(!Probe %in% c(mlma_sig$Probe, crossreactive_probes)))), nrow=2)
+  rownames(tab) <- c("Significant", "Not Significant")
+  colnames(tab) <- c("Cross-reactive", "Not Cross-reactive")
+  
+  fisher_test <- fisher.test(tab)
+  stats <- tibble(cutoff = cutoff, OR = fisher_test$estimate, p = fisher_test$p.value, 
+                  conf.int.lower = fisher_test$conf.int[1], conf.int.upper = fisher_test$conf.int[2])
+  list(stats = stats, table = tab)
+}
+enrichments <- purrr::map(5:20, .f = check_enrichment)
+enrichment_stats <- purrr::map_df(enrichments, "stats")
+
+# Plot odds ratios 
+ORs_plot <- enrichment_stats %>% 
+  dplyr::filter(cutoff <= 14) %>%
+  dplyr::mutate(cutoff = factor(cutoff)) %>%
+  ggplot(aes(x = cutoff, y = OR)) + geom_errorbar(aes(ymin = 1.05, ymax=conf.int.upper),width=0.2) + 
+  geom_bar(stat = 'identity', fill = '#BC3C29FF', alpha = 1) + 
+  theme_classic() +  
+  scale_y_continuous(trans='log10', breaks = c(1,10,100,1000, 10000)) +  
+  theme(axis.text = element_text(size = text_size),
+        axis.title = element_text(size = text_size)) + 
+  xlab('Cutoff (bp)') + ylab('Odds Ratio')
+ORs_plot
+```
+
+
+## Comparison with previous literature
+
+We checked how many of the identified cross-reactive probes were flagged in previous studies (Chen *et al.*, Naeem *et al.*, Zhou *et al.*):
+
+```{r plot_mismatch_indel_typeI_reference}
+# Chen
+chen <- readxl::read_excel("../data/extdata/48639-non-specific-probes-Illumina450k.xlsx")
+
+# Zhou 
+zhou <- read_tsv("../data/extdata/hm450.hg38.manifest.tsv.gz")
+zhou <- zhou %>% dplyr::filter(MASK_sub30_copy, MASK_mapping)
+
+# Naeem
+naeem <- read_csv("../data/extdata/12864_2013_7006_MOESM2_ESM.csv")
+naeem <- naeem %>% dplyr::filter(MultiMap == 1 | Repeat == 1)
+
+
+plot_typeI_mismatch_indel_correlated_methylated_reference <- matches_methylated_mismatch_indel_final %>% 
+  dplyr::mutate(previously_flagged = ifelse(Probe %in% c(chen$TargetID, zhou$probeID, naeem$probe), TRUE, FALSE)) %>%
+  dplyr::filter(!is.na(cistrans)) %>%
+  dplyr::filter(Type == "I") %>%
+  ggplot(aes(x = width, y = -log10(p_updated), color = previously_flagged, shape = cistrans)) +
+  geom_point(size=point_size) + 
+  theme_classic() +
+  geom_hline(yintercept = -log10(0.05/nrow(mlma)), linetype = "dashed") +
+  theme(text = element_text(size = text_size),
+       # legend.position=c(0.17,0.85)
+       legend.position = "none") + 
+  xlab("C9 repeat inexact match (bp)") +
+  ylab(bquote(-log[10](P_updated)~" C9 EWAS"))  +
+  scale_color_nejm() +
+  guides(color=guide_legend(title="In Reference"))
+
+plot_typeI_mismatch_indel_correlated_methylated_reference +  theme(legend.position="right")
+```
+
+```{r overlap_reference_lists}
+crossreactive_reference <- unique(c(chen$TargetID, zhou$probeID, naeem$probe))
+mlma_sig_crossreactive <- mlma_sig %>% dplyr::filter(Probe %in% crossreactive_probes_methylated)
+
+tab_reference <- tibble(reference = c("Chen et al.", "Naeem et al.", "Zhou et al.", "Total"), 
+              nr_crossreactive = c(sum(crossreactive_probes_methylated %in% chen$TargetID), 
+                                   sum(crossreactive_probes_methylated %in% naeem$probe),
+                                   sum(crossreactive_probes_methylated %in% zhou$probeID),
+                                   sum(crossreactive_probes_methylated %in% crossreactive_reference)
+                                   ),
+              total_cross_reactive = rep(length(crossreactive_probes_methylated),4),
+              nr_crossreactive_sig = c(sum(mlma_sig_crossreactive$Probe %in% chen$TargetID),
+                                       sum(mlma_sig_crossreactive$Probe %in% naeem$probe),
+                                       sum(mlma_sig_crossreactive$Probe %in% zhou$probeID),
+                                       sum(mlma_sig_crossreactive$Probe %in% crossreactive_reference)
+                                       ),
+              nr_crossreactive_sig_total = rep(nrow(mlma_sig_crossreactive), 4))
+tab_reference <- tab_reference %>%
+  dplyr::mutate(nr_crossreactive = sprintf("%s/%s", nr_crossreactive, total_cross_reactive),
+                nr_crossreactive_sig = sprintf("%s/%s", nr_crossreactive_sig, nr_crossreactive_sig_total)) %>%
+  dplyr::select(reference, nr_crossreactive, nr_crossreactive_sig)
+tab_reference
+```
+
+Published lists of cross-reactive probes do not capture most of these cross-reactive probes.
+This can be explained by  
+(a) The C9 repeat expansion is not present in the reference genome.
+(b) Mismatches/INDELs where not allowed when mapping probes to the genome. 
+(c) Matches between these probes and the C9 repeat are smaller than cutoffs used in published lists (Zhou: >30bp, Chen: >47bp)
+
+## Sensitivity analyses
+
+### Unmethylated Repeat
+
+In the previous analyses, we assumed the repeat is methylated. If we assume that the repeat is unmethylated, we observed that for several type I probes the unmethylated beads have a larger match with the C9 repeat than their methylated counterparts and the (methylated) C9 repeat. This can be explained by the lower sequence complexity of the unmethylated probe sequences (a 'TG' sequence is indistinguishable from an unmethylated CpG-site after bisulfite conversion).
+None of the probes with large differences (unmethylated bead having a larger match) are significant. This is presumably because the repeat is generally fully methylated in C9 carriers. 
+
+Type I probes:
+
+```{r diff_plot_unmethylated_methylated_typeI}
+test_methylated_unmethylated_mismatch_indel2 <- matches_methylated_mismatch_indel_final %>%
+  dplyr::filter(Type2 == "I_Methylated") %>%
+  dplyr::left_join(matches_unmethylated_mismatch_indel_final %>% dplyr::select(Probe, Type2, width) %>%
+                     dplyr::filter(Type2 == "I_Unmethylated"),
+                   by = "Probe") %>%
+  dplyr::mutate(diff = width.y-width.x)
+
+
+test_methylated_unmethylated_mismatch_indel2 <- test_methylated_unmethylated_mismatch_indel2 %>%
+  dplyr::mutate(pvalue = dplyr::case_when(
+    p_updated < 1e-16 ~ "<1e-16",
+    p_updated > 1e-16 & p_updated < 1e-7 ~ "<1e-7",
+    p_updated > 1e-7 ~ ">1e-7",
+    TRUE ~ NA_character_
+  ))
+
+
+max <- max(c(test_methylated_unmethylated_mismatch_indel2$width.x, test_methylated_unmethylated_mismatch_indel2$width.y), na.rm = TRUE)
+min <- min(c(test_methylated_unmethylated_mismatch_indel2$width.x, test_methylated_unmethylated_mismatch_indel2$width.y), na.rm = TRUE)
+
+diff_plot_unmethylated_methylated_typeI <- test_methylated_unmethylated_mismatch_indel2 %>%
+  dplyr::filter(!is.na(pvalue), !is.na(cistrans)) %>%
+  dplyr::mutate(pvalue = factor(pvalue, levels = c(">1e-7", "<1e-7", "<1e-16"))) %>%
+  ggplot(aes(x = width.x, y = width.y, color = pvalue, shape = cistrans)) +
+  geom_point(size = point_size, alpha=1) +
+  geom_point(data = test_methylated_unmethylated_mismatch_indel2 %>% dplyr::filter(pvalue == "<1e-7"), size = point_size, alpha = 1) +
+  geom_point(data = test_methylated_unmethylated_mismatch_indel2 %>% dplyr::filter(pvalue == "<1e-16"), size = point_size, alpha = 1) +
+  theme_classic() +
+   xlim(min, max) +
+   ylim(min, max) +
+  theme(text = element_text(size = text_size-1),
+         legend.position = "None") +
+  scale_diff_plots +
+  xlab("Inexact C9 Match Length (Methylated)") +
+  ylab("Inexact C9 Match Length (Unmethylated)") 
+diff_plot_unmethylated_methylated_typeI + theme(legend.position="right", legend.title = element_blank())
+```
+
+Type II probes:
+
+```{r diff_plot_unmethylated_methylated_typeII}
+test_methylated_unmethylated_mismatch_indel_typeII <- matches_methylated_mismatch_indel_final %>%
+  dplyr::filter(Type2 == "II")  %>%
+  dplyr::left_join(matches_unmethylated_mismatch_indel_final %>% dplyr::select(Probe, Type2, width),by = "Probe") %>%
+  dplyr::mutate(diff = width.y-width.x)
+
+
+test_methylated_unmethylated_mismatch_indel_typeII <- test_methylated_unmethylated_mismatch_indel_typeII %>%
+  dplyr::mutate(pvalue = dplyr::case_when(
+    p < 1e-16 ~ "<1e-16",
+    p > 1e-16 & p < 1e-7 ~ "<1e-7",
+    p > 1e-7 ~ ">1e-7",
+    TRUE ~ NA_character_
+  ))
+
+max <- max(c(test_methylated_unmethylated_mismatch_indel_typeII$width.x, test_methylated_unmethylated_mismatch_indel_typeII$width.y), na.rm=TRUE)
+min <- min(c(test_methylated_unmethylated_mismatch_indel_typeII$width.x, test_methylated_unmethylated_mismatch_indel_typeII$width.y), na.rm=TRUE)
+
+diff_plot_unmethylated_methylated_typeII <- test_methylated_unmethylated_mismatch_indel_typeII %>%
+  dplyr::filter(!is.na(cistrans)) %>%
+  dplyr::mutate(pvalue = factor(pvalue, levels = c(">1e-7", "<1e-7", "<1e-16"))) %>%
+  ggplot(aes(x = width.x, y = width.y, color = pvalue, shape = cistrans)) +
+  geom_point(size = point_size, alpha=1) +
+  geom_point(data = test_methylated_unmethylated_mismatch_indel_typeII %>% dplyr::filter(pvalue == "<1e-7"), size = point_size, alpha = 1) +
+  geom_point(data = test_methylated_unmethylated_mismatch_indel_typeII %>% dplyr::filter(pvalue == "<1e-16"), size = point_size, alpha = 1) +
+  theme_classic() +
+  theme(text = element_text(size = text_size-1),
+         legend.position = "None") +
+  xlim(min, max) + 
+  ylim(min, max) +
+  scale_diff_plots +
+  xlab("Inexact C9 Match Length (Methylated)") +
+  ylab("Inexact C9 Match Length (Unmethylated)") 
+diff_plot_unmethylated_methylated_typeII + theme(legend.position="right", legend.title = element_blank())
+```
+
+
+### Using Y bases (IUPAC) to represent C's in CpG-sites
+
+Previously, we assumed that the repeat was either fully methylated or fully unmethylated. 
+Alternatively, we can represent C's in CpG-sites by Y bases which represent either a C or a T, therefore any combination of methylation statuses is allowed.
+For the methylated bead types this leads to an increased match for some probes, however these probes do not show significant associations:
+
+
+```{r diff_methylated_YpG}
+test_methylated_YpG_mismatch_indel2 <- matches_methylated_mismatch_indel_final %>%
+  dplyr::filter(Type2 == "I_Methylated") %>%
+  dplyr::left_join(matches_YpG_mismatch_indel_final %>% dplyr::filter(Type2 == "I_Methylated") %>% dplyr::select(Probe, Type2, width),by = "Probe") %>%
+  dplyr::mutate(diff = width.y-width.x)
+
+test_methylated_YpG_mismatch_indel2 <- test_methylated_YpG_mismatch_indel2 %>%
+  dplyr::mutate(pvalue = dplyr::case_when(
+    p_updated < 1e-16 ~ "<1e-16",
+    p_updated > 1e-16 & p_updated < 1e-7 ~ "<1e-7",
+    p_updated > 1e-7 ~ ">1e-7",
+    TRUE ~ NA_character_
+  ))
+
+max <- max(c(test_methylated_YpG_mismatch_indel2$width.x, test_methylated_YpG_mismatch_indel2$width.y), na.rm=TRUE)
+min <- min(c(test_methylated_YpG_mismatch_indel2$width.x, test_methylated_YpG_mismatch_indel2$width.y), na.rm=TRUE)
+
+diff_plot_methylated_YpG_mismatch_indel2_2 <- test_methylated_YpG_mismatch_indel2 %>%
+  dplyr::filter(!is.na(cistrans)) %>%
+  dplyr::mutate(pvalue = factor(pvalue, levels = c(">1e-7", "<1e-7", "<1e-16"))) %>%
+  ggplot(aes(x = width.x, y = width.y, color = pvalue, shape = cistrans)) +
+  geom_point(size = point_size, alpha=1) +
+  geom_point(data = test_methylated_YpG_mismatch_indel2 %>% dplyr::filter(pvalue == "<1e-7"), size = point_size, alpha = 1) +
+  geom_point(data = test_methylated_YpG_mismatch_indel2 %>% dplyr::filter(pvalue == "<1e-16"), size = point_size, alpha = 1) +
+  theme_classic() +
+  theme(text = element_text(size = text_size),
+         legend.position = "None") +
+  xlim(min, max) +
+  ylim(min, max) +
+  scale_diff_plots +
+  xlab("Inexact C9 Match Length (Methylated)") +
+  ylab("Inexact C9 Match Length (YpG)") 
+diff_plot_methylated_YpG_mismatch_indel2_2 + theme(legend.position="right", legend.title = element_blank())
+```
+
+For unmethylated beads there is no difference in C9 match when assuming either that the repeat is unmethylated or using YpG coding:
+
+```{r diff_unmethylated_YpG}
+test_unmethylated_YpG_mismatch_indel2 <- matches_unmethylated_mismatch_indel_final %>%
+  dplyr::filter(Type2 == "I_Unmethylated") %>%
+  dplyr::left_join(matches_YpG_mismatch_indel_final %>% dplyr::filter(Type2 == "I_Unmethylated") %>% dplyr::select(Probe, Type2, width),by = "Probe") %>%
+  dplyr::mutate(diff = width.y-width.x)
+
+test_unmethylated_YpG_mismatch_indel2 <- test_unmethylated_YpG_mismatch_indel2 %>%
+  dplyr::mutate(pvalue = dplyr::case_when(
+    p_updated < 1e-16 ~ "<1e-16",
+    p_updated > 1e-16 & p_updated < 1e-7 ~ "<1e-7",
+    p_updated > 1e-7 ~ ">1e-7",
+    TRUE ~ NA_character_
+  ))
+
+max <- max(c(test_unmethylated_YpG_mismatch_indel2$width.x, test_unmethylated_YpG_mismatch_indel2$width.y), na.rm=TRUE)
+min <- min(c(test_unmethylated_YpG_mismatch_indel2$width.x, test_unmethylated_YpG_mismatch_indel2$width.y), na.rm=TRUE)
+
+diff_plot_unmethylated_YpG_mismatch_indel2_2 <- test_unmethylated_YpG_mismatch_indel2 %>%
+  dplyr::filter(!is.na(cistrans)) %>%
+  dplyr::mutate(pvalue = factor(pvalue, levels = c(">1e-7", "<1e-7", "<1e-16"))) %>%
+  ggplot(aes(x = width.x, y = width.y, color = pvalue, shape = cistrans)) +
+  geom_point(size = point_size, alpha=1) +
+  geom_point(data = test_unmethylated_YpG_mismatch_indel2 %>% dplyr::filter(pvalue == "<1e-7"), size = point_size, alpha = 1) +
+  geom_point(data = test_unmethylated_YpG_mismatch_indel2 %>% dplyr::filter(pvalue == "<1e-16"), size = point_size, alpha = 1) +
+  theme_classic() +
+  theme(text = element_text(size = text_size),
+         legend.position = "None") +
+  xlim(min, max) +
+  ylim(min, max) +
+  scale_diff_plots +
+  xlab("Inexact C9 Match Length (Unmethylated)") +
+  ylab("Inexact C9 Match Length (YpG)")
+diff_plot_unmethylated_YpG_mismatch_indel2_2 + theme(legend.position="right", legend.title = element_blank())
+```
+
+Type II probes:
+
+```{r diff_typeII_YpG_unmethylated}
+test_typeII_YpG_mismatch_indel2_unmethylated <- matches_unmethylated_mismatch_indel_final %>%
+  dplyr::filter(Type2 == "II") %>%
+  dplyr::left_join(matches_YpG_mismatch_indel_final %>% dplyr::filter(Type2 == "II") %>% dplyr::select(Probe, Type2, width),by = "Probe") %>%
+  dplyr::mutate(diff = width.y-width.x)
+
+test_typeII_YpG_mismatch_indel2_unmethylated <- test_typeII_YpG_mismatch_indel2_unmethylated %>%
+  dplyr::mutate(pvalue = dplyr::case_when(
+    p_updated < 1e-16 ~ "<1e-16",
+    p_updated > 1e-16 & p_updated < 1e-7 ~ "<1e-7",
+    p_updated > 1e-7 ~ ">1e-7",
+    TRUE ~ NA_character_
+  ))
+
+
+max <- max(c(test_typeII_YpG_mismatch_indel2_unmethylated$width.x, test_typeII_YpG_mismatch_indel2_unmethylated$width.y), na.rm=TRUE)
+min <- min(c(test_typeII_YpG_mismatch_indel2_unmethylated$width.x, test_typeII_YpG_mismatch_indel2_unmethylated$width.y), na.rm=TRUE)
+
+diff_plot_typeII_unmethylated_YpG_mismatch_indel2_2 <- test_typeII_YpG_mismatch_indel2_unmethylated %>%
+  dplyr::filter(!is.na(cistrans)) %>%
+  dplyr::mutate(pvalue = factor(pvalue, levels = c(">1e-7", "<1e-7", "<1e-16"))) %>%
+  ggplot(aes(x = width.x, y = width.y, color = pvalue, shape = cistrans)) +
+  geom_point(size = point_size, alpha=1) +
+  geom_point(data = test_typeII_YpG_mismatch_indel2_unmethylated %>% dplyr::filter(pvalue == "<1e-7"), size = point_size, alpha = 1) +
+  geom_point(data = test_typeII_YpG_mismatch_indel2_unmethylated %>% dplyr::filter(pvalue == "<1e-16"), size = point_size, alpha = 1) +
+  theme_classic() +
+  theme(text = element_text(size = text_size),
+         legend.position = "None") +
+  xlim(min, max) +
+  ylim(min, max) +
+  scale_diff_plots +
+  xlab("Inexact C9 Match Length (Unmethylated)") +
+  ylab("Inexact C9 Match Length (YpG)") 
+diff_plot_typeII_unmethylated_YpG_mismatch_indel2_2 + theme(legend.position="right", legend.title = element_blank())
+```
+
+```{r diff_typeII_YpG_methylated}
+test_typeII_YpG_mismatch_indel2_methylated <- matches_methylated_mismatch_indel_final %>%
+  dplyr::filter(Type2 == "II") %>%
+  dplyr::left_join(matches_YpG_mismatch_indel_final %>% dplyr::filter(Type2 == "II") %>% 
+                     dplyr::select(Probe, Type2, width),by = "Probe") %>%
+  dplyr::mutate(diff = width.y-width.x)
+
+test_typeII_YpG_mismatch_indel2_methylated <- test_typeII_YpG_mismatch_indel2_methylated %>%
+  dplyr::mutate(pvalue = dplyr::case_when(
+    p_updated < 1e-16 ~ "<1e-16",
+    p_updated > 1e-16 & p_updated < 1e-7 ~ "<1e-7",
+    p_updated > 1e-7 ~ ">1e-7",
+    TRUE ~ NA_character_
+  ))
+
+max <- max(c(test_typeII_YpG_mismatch_indel2_methylated$width.x, test_typeII_YpG_mismatch_indel2_methylated$width.y), na.rm=TRUE)
+min <- min(c(test_typeII_YpG_mismatch_indel2_methylated$width.x, test_typeII_YpG_mismatch_indel2_methylated$width.y), na.rm=TRUE)
+
+diff_plot_typeII_methylated_YpG_mismatch_indel2_2 <- test_typeII_YpG_mismatch_indel2_methylated %>%
+  dplyr::filter(!is.na(cistrans)) %>%
+  dplyr::mutate(pvalue = factor(pvalue, levels = c(">1e-7", "<1e-7", "<1e-16"))) %>%
+  ggplot(aes(x = width.x, y = width.y, color = pvalue, shape = cistrans)) +
+  geom_point(size = point_size, alpha=1) +
+  geom_point(data = test_typeII_YpG_mismatch_indel2_methylated %>% dplyr::filter(pvalue == "<1e-7"), size = point_size, alpha = 1) +
+  geom_point(data = test_typeII_YpG_mismatch_indel2_methylated %>% dplyr::filter(pvalue == "<1e-16"), size = point_size, alpha = 1) +
+  theme_classic() +
+  theme(text = element_text(size = text_size),
+         legend.position = "None") +
+  xlim(min, max) +
+  ylim(min, max) +
+  scale_diff_plots +
+  xlab("Inexact C9 Match Length (Methylated)") +
+  ylab("Inexact C9 Match Length (YpG)") 
+diff_plot_typeII_methylated_YpG_mismatch_indel2_2 + theme(legend.position="right", legend.title = element_blank())
+```
+
+
+### Include Regions Flanking the C9 repeat 
+
+Here test whether including the regions flanking the C9 repeat (50bp on both sides), leads to increased matches:
+
+```{r include_flanking_methylated}
+
+# Load matches (methylated)
+matches_methylated_nomismatch_includeflanking_final <- readRDS("../data/processed/c9_matches/450k_matches_methylated_nomismatch_includeflanking_final_start1bp.rds")
+matches_methylated_mismatch_indel_includeflanking_final <- readRDS("../data/processed/c9_matches/450k_matches_methylated_mismatch_indel_includeflanking_final.rds")
+matches_methylated_nomismatch_includeflanking_final_max5 <- matches_methylated_nomismatch_includeflanking_final %>%
+  dplyr::filter(width <= 5)
+matches_methylated_nomismatch_includeflanking_final_max5 <- matches_methylated_nomismatch_includeflanking_final_max5  %>%
+  dplyr::filter(!Probe %in% matches_methylated_mismatch_indel_includeflanking_final$Probe)
+matches_methylated_mismatch_indel_includeflanking_final <- dplyr::bind_rows(matches_methylated_nomismatch_includeflanking_final_max5, matches_methylated_mismatch_indel_includeflanking_final)
+
+## Add annotation
+matches_methylated_mismatch_indel_includeflanking_final <- matches_methylated_mismatch_indel_includeflanking_final %>% 
+  dplyr::left_join(mlma[,c("Probe", "p", "t")], by = "Probe") %>% 
+  dplyr::left_join(mlma_oob[,c("Probe", "p_oob", "t_oob")], by = "Probe")
+
+## Add 'p_updated' column: if there is a predicted color channel switch, use the OOB p-value 
+matches_methylated_mismatch_indel_includeflanking_final <- matches_methylated_mismatch_indel_includeflanking_final %>% 
+  dplyr::mutate(
+    p_updated = case_when(
+      Color == "" ~ p,
+      predicted_color != Color ~ p_oob, 
+      TRUE ~p
+    ),
+  color_switch = case_when(
+      Color == "" ~ FALSE,
+      predicted_color != Color ~ TRUE, 
+      TRUE ~ FALSE
+    )
+  )
+
+matches_methylated_mismatch_indel_includeflanking_final <- matches_methylated_mismatch_indel_includeflanking_final %>%
+  dplyr::left_join(mlma[,c("Probe", "cistrans")], by = "Probe")
+
+# Load matches (unmethylated)
+matches_unmethylated_nomismatch_includeflanking_final <- readRDS("../data/processed/c9_matches/450k_matches_unmethylated_nomismatch_includeflanking_final_start1bp.rds")
+matches_unmethylated_mismatch_indel_includeflanking_final <- readRDS("../data/processed/c9_matches/450k_matches_unmethylated_mismatch_indel_includeflanking_final.rds")
+matches_unmethylated_nomismatch_includeflanking_final_max5 <- matches_unmethylated_nomismatch_includeflanking_final %>%
+  dplyr::filter(width <= 5)
+matches_unmethylated_nomismatch_includeflanking_final_max5 <- matches_unmethylated_nomismatch_includeflanking_final_max5  %>%
+  dplyr::filter(!Probe %in% matches_unmethylated_mismatch_indel_includeflanking_final$Probe)
+matches_unmethylated_mismatch_indel_includeflanking_final <- dplyr::bind_rows(matches_unmethylated_nomismatch_includeflanking_final_max5, matches_unmethylated_mismatch_indel_includeflanking_final)
+
+## Add annotation
+matches_unmethylated_mismatch_indel_includeflanking_final <- matches_unmethylated_mismatch_indel_includeflanking_final %>% 
+  dplyr::left_join(mlma[,c("Probe", "p", "t")], by = "Probe") %>% 
+  dplyr::left_join(mlma_oob[,c("Probe", "p_oob", "t_oob")], by = "Probe")
+
+## Add 'p_updated' column: if there is a predicted color channel switch, use the OOB p-value 
+matches_unmethylated_mismatch_indel_includeflanking_final <- matches_unmethylated_mismatch_indel_includeflanking_final %>% 
+  dplyr::mutate(
+    p_updated = case_when(
+      Color == "" ~ p,
+      predicted_color != Color ~ p_oob, 
+      TRUE ~p
+    ),
+  color_switch = case_when(
+      Color == "" ~ FALSE,
+      predicted_color != Color ~ TRUE, 
+      TRUE ~ FALSE
+    )
+  )
+
+matches_unmethylated_mismatch_indel_includeflanking_final <- matches_unmethylated_mismatch_indel_includeflanking_final %>%
+  dplyr::left_join(mlma[,c("Probe", "cistrans")], by = "Probe")
+```
+
+```{r diff_flanking_methylated}
+diff_flanking_methylated <- matches_methylated_mismatch_indel_final %>%
+  dplyr::filter(Type2 != "I_Unmethylated") %>%
+  dplyr::left_join(matches_methylated_mismatch_indel_includeflanking_final %>% dplyr::filter(Type2 != "I_Unmethylated") %>% dplyr::select(Probe, Type2, width),by = "Probe") %>%
+  dplyr::mutate(diff = width.y-width.x)
+
+diff_flanking_methylated <- diff_flanking_methylated %>%
+  dplyr::mutate(pvalue = dplyr::case_when(
+    p_updated < 1e-16 ~ "<1e-16",
+    p_updated > 1e-16 & p_updated < 1e-7 ~ "<1e-7",
+    p_updated > 1e-7 ~ ">1e-7",
+    TRUE ~ NA_character_
+  ))
+
+max <- max(c(diff_flanking_methylated$width.x, diff_flanking_methylated$width.y), na.rm=TRUE)
+min <- min(c(diff_flanking_methylated$width.x, diff_flanking_methylated$width.y), na.rm=TRUE)
+
+diff_plot_flanking_methylated <- diff_flanking_methylated %>%
+  dplyr::filter(!is.na(cistrans)) %>%
+  dplyr::mutate(pvalue = factor(pvalue, levels = c(">1e-7", "<1e-7", "<1e-16"))) %>%
+  ggplot(aes(x = width.x, y = width.y, color = pvalue, shape = cistrans)) +
+  geom_point(size = point_size, alpha=1) +
+  geom_point(data = diff_flanking_methylated %>% dplyr::filter(pvalue == "<1e-7"), size = point_size, alpha = 1) +
+  geom_point(data = diff_flanking_methylated %>% dplyr::filter(pvalue == "<1e-16"), size = point_size, alpha = 1) +
+  theme_classic() +
+  theme(text = element_text(size = text_size),
+         legend.position = "None") +
+  xlim(min, max) +
+  ylim(min, max) +
+  scale_diff_plots +
+  xlab("Inexact C9 Match Length") +
+  ylab("Inexact C9 Match Length (incl. flanking)") 
+diff_plot_flanking_methylated + theme(legend.position="right", legend.title = element_blank())
+```
+
+```{r diff_flanking_both}
+matches_methylated_unmethylated_mismatch_indel_final <- dplyr::bind_rows(matches_methylated_mismatch_indel_final, matches_unmethylated_mismatch_indel_final)
+matches_methylated_unmethylated_mismatch_indel_final <- matches_methylated_unmethylated_mismatch_indel_final %>%
+  dplyr::group_by(Probe) %>%
+  dplyr::filter(width == max(width, na.rm = TRUE)) %>%
+  dplyr::ungroup()
+
+matches_methylated_unmethylated_mismatch_indel_includeflanking_final <- dplyr::bind_rows(matches_methylated_mismatch_indel_includeflanking_final, matches_unmethylated_mismatch_indel_includeflanking_final)
+matches_methylated_unmethylated_mismatch_indel_includeflanking_final <- matches_methylated_unmethylated_mismatch_indel_includeflanking_final %>%
+  dplyr::group_by(Probe) %>%
+  dplyr::filter(width == max(width, na.rm = TRUE)) %>%
+  dplyr::ungroup()
+
+diff_flanking_both <- matches_methylated_unmethylated_mismatch_indel_final %>%
+  dplyr::left_join(matches_methylated_unmethylated_mismatch_indel_includeflanking_final %>% dplyr::select(Probe, Type2, width), 
+                   by = "Probe") %>%
+  dplyr::mutate(diff = width.y-width.x)
+
+diff_flanking_both <- diff_flanking_both %>%
+  dplyr::mutate(pvalue = dplyr::case_when(
+    p_updated < 1e-16 ~ "<1e-16",
+    p_updated > 1e-16 & p_updated < 1e-7 ~ "<1e-7",
+    p_updated > 1e-7 ~ ">1e-7",
+    TRUE ~ NA_character_
+  ))
+
+max <- max(c(diff_flanking_both$width.x, diff_flanking_both$width.y), na.rm=TRUE)
+min <- min(c(diff_flanking_both$width.x, diff_flanking_both$width.y), na.rm=TRUE)
+
+
+diff_plot_flanking_both <- diff_flanking_both %>%
+  dplyr::filter(!is.na(cistrans)) %>%
+  dplyr::mutate(pvalue = factor(pvalue, levels = c(">1e-7", "<1e-7", "<1e-16"))) %>%
+  ggplot(aes(x = width.x, y = width.y, color = pvalue, shape = cistrans)) +
+  geom_point(size = point_size, alpha=1) +
+  geom_point(data = diff_flanking_both %>% dplyr::filter(pvalue == "<1e-7"), size = point_size, alpha = 1) +
+  geom_point(data = diff_flanking_both %>% dplyr::filter(pvalue == "<1e-16"), size = point_size, alpha = 1) +
+  theme_classic() +
+  theme(text = element_text(size = text_size),
+         legend.position = "None") +
+  xlim(min, max) +
+  ylim(min, max) +
+  scale_diff_plots +
+  xlab("Inexact C9 Match Length") +
+  ylab("Inexact C9 Match Length (incl. flanking)") 
+diff_plot_flanking_both + theme(legend.position="right", legend.title = element_blank())
+```
+
+### Allowing mismatch/INDEL closer to the 3'end of the probe
+
+As shown previously, one significant probe remains that would have a considerable C9 match when we would have allowed mismatches/indel closer to the 3'end of the probe. We ran the algorithm again, allowing a mismatch/INDEL at any location in the probe (instead of >5bp).
+
+
+
+```{r mismatch_indel_0bp}
+# Load data
+matches_methylated_mismatch_indel_0bp_final <- readRDS("../data/processed/c9_matches/450k_matches_methylated_mismatch_indel_0bp_final.rds")
+matches_unmethylated_mismatch_indel_0bp_final <- readRDS("../data/processed/c9_matches/450k_matches_unmethylated_mismatch_indel_0bp_final.rds")
+
+
+matches_methylated_mismatch_indel_0bp_final_14bp <- matches_methylated_mismatch_indel_0bp_final %>%
+  dplyr::filter(width >= 14)
+
+matches_unmethylated_mismatch_indel_0bp_final_14bp <- matches_unmethylated_mismatch_indel_0bp_final %>%
+  dplyr::filter(width >= 14)
+
+cr_probes_0bp <- unique(c(matches_methylated_mismatch_indel_0bp_final_14bp$Probe, matches_unmethylated_mismatch_indel_0bp_final_14bp$Probe))
+
+## Add annotation
+matches_methylated_mismatch_indel_0bp_final <- matches_methylated_mismatch_indel_0bp_final %>% 
+  dplyr::left_join(mlma[,c("Probe", "p", "t")], by = "Probe") %>% 
+  dplyr::left_join(mlma_oob[,c("Probe", "p_oob", "t_oob")], by = "Probe")
+
+## Add 'p_updated' column: if there is a predicted color channel switch, use the OOB p-value 
+matches_methylated_mismatch_indel_0bp_final <- matches_methylated_mismatch_indel_0bp_final %>% 
+  dplyr::mutate(
+    p_updated = case_when(
+      Color == "" ~ p,
+      predicted_color != Color ~ p_oob, 
+      TRUE ~p
+    ),
+  color_switch = case_when(
+      Color == "" ~ FALSE,
+      predicted_color != Color ~ TRUE, 
+      TRUE ~ FALSE
+    )
+  )
+
+matches_methylated_mismatch_indel_0bp_final <- matches_methylated_mismatch_indel_0bp_final %>%
+  dplyr::left_join(mlma[,c("Probe", "cistrans")], by = "Probe")
+
+## Add annotation - unmethylated
+matches_unmethylated_mismatch_indel_0bp_final <- matches_unmethylated_mismatch_indel_0bp_final %>% 
+  dplyr::left_join(mlma[,c("Probe", "p", "t")], by = "Probe") %>% 
+  dplyr::left_join(mlma_oob[,c("Probe", "p_oob", "t_oob")], by = "Probe")
+
+## Add 'p_updated' column: if there is a predicted color channel switch, use the OOB p-value 
+matches_unmethylated_mismatch_indel_0bp_final <- matches_unmethylated_mismatch_indel_0bp_final %>% 
+  dplyr::mutate(
+    p_updated = case_when(
+      Color == "" ~ p,
+      predicted_color != Color ~ p_oob, 
+      TRUE ~p
+    ),
+  color_switch = case_when(
+      Color == "" ~ FALSE,
+      predicted_color != Color ~ TRUE, 
+      TRUE ~ FALSE
+    )
+  )
+
+matches_unmethylated_mismatch_indel_0bp_final <- matches_unmethylated_mismatch_indel_0bp_final %>%
+  dplyr::left_join(mlma[,c("Probe", "cistrans")], by = "Probe")
+
+matches_methylated_unmethylated_mismatch_indel_0bp_final <- dplyr::bind_rows(matches_methylated_mismatch_indel_0bp_final, matches_unmethylated_mismatch_indel_0bp_final)
+matches_methylated_unmethylated_mismatch_indel_0bp_final <- matches_methylated_unmethylated_mismatch_indel_0bp_final %>%
+  dplyr::group_by(Probe) %>%
+  dplyr::filter(width == max(width, na.rm = TRUE)) %>%
+  dplyr::ungroup()
+
+diff_0bp_both <- matches_methylated_unmethylated_mismatch_indel_final  %>%
+  dplyr::left_join(matches_methylated_unmethylated_mismatch_indel_0bp_final %>% dplyr::select(Probe, Type2, width), 
+                   by = "Probe") %>%
+  dplyr::mutate(diff = width.y-width.x) %>%
+  dplyr::filter(!duplicated(.))
+
+
+diff_0bp_both <- diff_0bp_both %>%
+  dplyr::mutate(pvalue = dplyr::case_when(
+    p_updated < 1e-16 ~ "<1e-16",
+    p_updated > 1e-16 & p_updated < 1e-7 ~ "<1e-7",
+    p_updated > 1e-7 ~ ">1e-7",
+    TRUE ~ NA_character_
+  ))
+
+max <- max(c(diff_0bp_both$width.x, diff_0bp_both$width.y), na.rm=TRUE)
+min <- min(c(diff_0bp_both$width.x, diff_0bp_both$width.y), na.rm=TRUE)
+
+diff_0bp_both <- diff_0bp_both %>%
+  mutate(width.x = ifelse(is.na(width.x) | width.x <= 5, 5, width.x),
+         width.y = ifelse(is.na(width.y) | width.y <= 5, 5, width.y)
+         )
+diff_plot_0bp_both <- diff_0bp_both %>%
+  dplyr::filter(!is.na(cistrans)) %>%
+  dplyr::mutate(pvalue = factor(pvalue, levels = c(">1e-7", "<1e-7", "<1e-16"))) %>%
+  ggplot(aes(x = width.x, y = width.y, color = pvalue, shape = cistrans)) +
+  geom_point(size = point_size, alpha=1) +
+  geom_point(data = diff_0bp_both %>% dplyr::filter(pvalue == "<1e-7"), size = point_size, alpha = 1) +
+  geom_point(data = diff_0bp_both %>% dplyr::filter(pvalue == "<1e-16"), size = point_size, alpha = 1) +
+  theme_classic() +
+  theme(text = element_text(size = text_size),
+         legend.position = "None") +
+  scale_x_continuous(breaks = c(5, 10, 15, 20, 25, 30, 35), labels = c("\u22645", "10", "15", "20", "25", "30", "35")) +
+  scale_y_continuous(breaks = c(5, 10, 15, 20, 25, 30, 35), labels = c("\u22645", "10", "15", "20", "25", "30", "35")) +
+  scale_diff_plots +
+  xlab("Inexact (\u22656bp) C9 Match Length") +
+  ylab("Inexact (\u22651bp) C9 Match Length") 
+diff_plot_0bp_both + theme(legend.position="right", legend.title = element_blank())
+
+```
+
+## Signal intensities
+
+Zhou *et al.* (2017) have suggested to evaluate signal intensities to assess signs of cross-reactivity (probes with many off-target matches should have higher signal intensity compared to non-cross-reactive probes). 
+We performed EWASs on total signal intensities, to test if the cross-reactive probes indeed show elevated signal intensities in carriers of the C9 expansion:
+
+### Comparison intensities IB and EWAS t-statistics
+
+Several of the significant sites showed elevated signal intensities in carriers of the C9 expansion:
+
+```{r total_intensities_ib}
+compare_mlma_total <- compare_tstats(mlma, total, label1 = " - \u03B2-values", label2 = " - Total Signal Intensities", highlight_sig = FALSE, text_size=text_size, point_size = point_size, highlight = crossreactive_probes_combined[crossreactive_probes_combined %in% mlma_sig$Probe])
+compare_mlma_total
+```
+
+###  Comparison intensities OOB and OOB EWAS t-statistics
+
+Similarly, several of the significant OOB sites showed elevated OOB signal intensities in carriers of the C9 expansion:
+
+```{r total_intensities_oob}
+# compare_mlma_total_oob <- compare_tstats(mlma_oob %>% dplyr::rename(p = p_oob), total_oob, label1 = " - OOB \u03B2-values", label2 = " - OOB Total Signal Intensities", highlight_sig = FALSE, text_size=text_size, point_size = point_size, highlight = crossreactive_probes_combined[crossreactive_probes_combined %in% mlma_oob_sig$Probe])
+# compare_mlma_total_oob
+compare_mlma_total_oob <- compare_tstats(mlma_oob %>% dplyr::rename(p = p_oob), total_oob, label1 = " - OOB \u03B2-values", label2 = " - OOB Total Signal Intensities", highlight_sig = FALSE, text_size=text_size, point_size = point_size, highlight = union(crossreactive_probes_combined, cr_probes_0bp)[union(crossreactive_probes_combined, cr_probes_0bp) %in% mlma_oob_sig$Probe])
+compare_mlma_total_oob
+```
+
+### Check confounding by signal saturation
+
+These results may be confounded by signal saturation effects, that is, for some probes $\beta$-values near 1 or 0 (i.e. fully methylated, or fully unmethylated) tend to have lower total signal intensities than $\beta$-values near 0.5 (intermediate methylation). This is because recorded intensities may truncate at high intensity levels, which is less likely to happen at intermediate methylation levels where the signal is roughly equally divided over two color channels. However, regardless of baseline $\beta$-values, we found similar total signal intensitiy differences across C9-mapping probes, indicating that there are true intensity differences between carriers and non-carriers:
+
+```{r beta_values_ib}
+total_sig <- total %>% dplyr::filter(p < 0.05 / nrow(.))
+total_oob_sig <- total_oob %>% dplyr::filter(p < 0.05 / nrow(.))
+samplesheet <- samplesheet %>% dplyr::filter(Pheno == 2, !is.na(Inferred_C9_status))
+beta_sig_total_sig <- beta[rownames(beta) %in% total_sig$Probe & rownames(beta) %in% crossreactive_probes_combined, samplesheet$Sample_Name]
+beta_oob_sig_total_sig <- beta_oob[rownames(beta_oob) %in% total_oob_sig$Probe & rownames(beta_oob) %in% crossreactive_probes_combined,samplesheet$Sample_Name]
+samplesheet_ib <- cbind(samplesheet, t(beta_sig_total_sig))
+samplesheet_oob <- cbind(samplesheet, t(beta_oob_sig_total_sig))
+
+beta_plot_ib <- samplesheet_ib %>%
+  dplyr::rename(C9_status = Inferred_C9_status) %>%
+  dplyr::mutate(C9_status = dplyr::case_when(
+    C9_status == "long" ~ "expanded",
+    C9_status == "wt" ~ "wild-type",
+    TRUE ~ NA_character_
+  )) %>%
+  tidyr::gather(key = "Probe", value = "beta", dplyr::starts_with("cg")) %>%
+  ggplot(aes(x = Probe, y = beta, fill = C9_status)) +
+  geom_hline(yintercept = 0.5 , linetype = "dashed") +
+  geom_boxplot(position = "dodge", outlier.shape = NA) +
+  colorblindr::scale_fill_OkabeIto() + 
+  theme_classic() +
+  ylab("\u03B2-value") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = text_size),
+        legend.position = "none")
+
+beta_plot_ib_legend <- samplesheet_ib %>%
+  dplyr::rename(C9_status = Inferred_C9_status) %>%
+  dplyr::mutate(C9_status = dplyr::case_when(
+    C9_status == "long" ~ "expanded",
+    C9_status == "wt" ~ "wild-type",
+    TRUE ~ NA_character_
+  )) %>%
+  tidyr::gather(key = "Probe", value = "beta", dplyr::starts_with("cg")) %>%
+  ggplot(aes(x = Probe, y = beta, fill = C9_status)) +
+  geom_hline(yintercept = 0.5 , linetype = "dashed") +
+  geom_boxplot(position = "dodge", outlier.shape = NA) +
+  colorblindr::scale_fill_OkabeIto() + 
+  theme_classic() +
+  ylab("\u03B2-value") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = text_size))
+beta_plot_ib
+```
+
+```{r beta_values_oob}
+beta_plot_oob <- samplesheet_oob %>%
+  dplyr::rename(C9_status = Inferred_C9_status) %>%
+  dplyr::mutate(C9_status = dplyr::case_when(
+    C9_status == "long" ~ "expanded",
+    C9_status == "wt" ~ "wild-type",
+    TRUE ~ NA_character_
+  )) %>%
+  tidyr::gather(key = "Probe", value = "beta", dplyr::starts_with("cg")) %>%
+  ggplot(aes(x = Probe, y = beta, fill = C9_status)) +
+  geom_hline(yintercept = 0.5 , linetype = "dashed") +
+  geom_boxplot(position = "dodge", outlier.shape = NA) +
+  colorblindr::scale_fill_OkabeIto() + 
+  theme_classic() +
+  ylab("\u03B2-value OOB") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = text_size),
+        legend.position = "none")
+beta_plot_oob
+```
+
+
+## EPIC replication set 
+
+```{r data_EPIC, include = FALSE}
+##### EPIC ######
+library(IlluminaHumanMethylationEPICanno.ilm10b2.hg19)
+data(IlluminaHumanMethylationEPICanno.ilm10b2.hg19)
+
+# Annotation
+annoEPIC <- as.data.frame(getAnnotation(IlluminaHumanMethylationEPICanno.ilm10b2.hg19))
+
+# Samplesheet
+samplesheet_EPIC <- readRDS("../data/raw/samplesheet_UK_2017.06_383samples_Ireland_2017.03_298samples_cleaned.rds")
+
+# MLMA results (linear)
+mlma_EPIC <- read_tsv("../data/output/ewas/mlma_EPIC_linear_c9_covarsexbatch_qcovaragecellcounts5PCs5controlPCs_missing0.05.linear")
+mlma_EPIC_oob <- read_tsv("../data/output/ewas/mlma_EPIC_linear_c9_covarsexbatch_qcovaragecellcounts5PCs5controlPCs_oob.linear")
+mlma_EPIC_oob <- mlma_EPIC_oob %>% 
+  dplyr::mutate(t = b / se) %>%
+  dplyr::rename(p_oob = p,
+                t_oob = t)
+mlma_EPIC_oob_sig <- mlma_EPIC_oob %>% dplyr::filter(p_oob < 0.05/nrow(.))
+
+mlma_EPIC <- mlma_EPIC %>%
+  dplyr::mutate(cistrans = dplyr::case_when(
+    Chr == 9 & bp > 27573527-100000 & bp < 27573544 + 100000 ~ "cis",
+    TRUE ~ "trans"
+  )) %>%
+  dplyr::mutate(cistrans = factor(cistrans, levels = c("trans", "cis")))
+
+mlma_EPIC <- mlma_EPIC %>% dplyr::mutate(t = b / se)
+mlma_EPIC_sig <- mlma_EPIC %>% dplyr::filter(p < 0.05/nrow(.))
+
+## Matches
+EPIC_matches_methylated_nomismatch_final <- readRDS("../data/processed/c9_matches/EPIC_matches_methylated_nomismatch_final.rds")
+EPIC_matches_unmethylated_nomismatch_final <- readRDS("../data/processed/c9_matches/EPIC_matches_unmethylated_nomismatch_final.rds")
+EPIC_matches_methylated_mismatch_indel_final <- readRDS("../data/processed/c9_matches/EPIC_matches_methylated_mismatch_indel_final.rds")
+EPIC_matches_unmethylated_mismatch_indel_final <- readRDS("../data/processed/c9_matches/EPIC_matches_unmethylated_mismatch_indel_final.rds")
+
+## Add p-values (normal + oob)
+EPIC_matches_methylated_nomismatch_final <- EPIC_matches_methylated_nomismatch_final %>% 
+  dplyr::left_join(mlma_EPIC[,c("Probe", "p", "t", "cistrans")], by = "Probe")
+EPIC_matches_methylated_nomismatch_final <- EPIC_matches_methylated_nomismatch_final %>% 
+  dplyr::left_join(mlma_EPIC_oob[,c("Probe", "p_oob", "t_oob")], by = "Probe")
+
+EPIC_matches_unmethylated_nomismatch_final <- EPIC_matches_unmethylated_nomismatch_final %>% 
+  dplyr::left_join(mlma_EPIC[,c("Probe", "p", "t", "cistrans")], by = "Probe")
+EPIC_matches_unmethylated_nomismatch_final <- EPIC_matches_unmethylated_nomismatch_final %>% 
+  dplyr::left_join(mlma_EPIC_oob[,c("Probe", "p_oob", "t_oob")], by = "Probe")
+
+EPIC_matches_methylated_mismatch_indel_final <- EPIC_matches_methylated_mismatch_indel_final %>% 
+  dplyr::left_join(mlma_EPIC[,c("Probe", "p", "t", "cistrans")], by = "Probe")
+EPIC_matches_methylated_mismatch_indel_final <- EPIC_matches_methylated_mismatch_indel_final %>% 
+  dplyr::left_join(mlma_EPIC_oob[,c("Probe", "p_oob", "t_oob")], by = "Probe")
+
+## Add 'p_updated' column: if there is a predicted color channel switch, use the OOB p-value 
+EPIC_matches_methylated_nomismatch_final <- EPIC_matches_methylated_nomismatch_final %>% 
+  dplyr::mutate(
+    p_updated = case_when(
+      Color == "" ~ p,
+      predicted_color != Color ~ p_oob, 
+      TRUE ~p
+    ),
+  color_switch = case_when(
+      Color == "" ~ FALSE,
+      predicted_color != Color ~ TRUE, 
+      TRUE ~ FALSE
+    )
+  )
+
+EPIC_matches_unmethylated_nomismatch_final <- EPIC_matches_unmethylated_nomismatch_final %>% 
+  dplyr::mutate(
+    p_updated = case_when(
+      Color == "" ~ p,
+      predicted_color != Color ~ p_oob, 
+      TRUE ~p
+    ),
+  color_switch = case_when(
+      Color == "" ~ FALSE,
+      predicted_color != Color ~ TRUE, 
+      TRUE ~ FALSE
+    )
+  )
+
+EPIC_matches_methylated_mismatch_indel_final <- EPIC_matches_methylated_mismatch_indel_final %>% 
+  dplyr::mutate(
+    p_updated = case_when(
+      Color == "" ~ p,
+      predicted_color != Color ~ p_oob, 
+      TRUE ~p
+    ),
+  color_switch = case_when(
+      Color == "" ~ FALSE,
+      predicted_color != Color ~ TRUE, 
+      TRUE ~ FALSE
+    )
+  )
+
+```
+
+We performed a replication analysis in an EPIC dataset consisting of `r sum(samplesheet_EPIC$C9ORF72.Status == "expanded")` expanded cases and `r sum(samplesheet_EPIC$C9ORF72.Status == "normal")` non-expanded cases. 
+
+### QQ-plot
+
+```{r qqplot_EPIC}
+qqplot_EPIC <- gg_qqplot(pval = mlma_EPIC$p, show_lambda = TRUE, ci = 0.95, 
+                    cut = TRUE, text_size = text_size + 1, point_size = point_size)
+
+qqplot_EPIC
+```
+
+### Manhattan plot
+
+```{r manhattan_EPIC}
+manhattan_EPIC <- gg.manhattan(mlma_EPIC, array = "EPIC", annotate_stats = annoEPIC, 
+                          text_size = text_size, point_size = point_size)
+manhattan_EPIC
+```
+
+Comparison between 450k and EPIC test-statistics (for overlapping probes). Probes with >=14bp match and that were significant in the 450k EWAS are highlighted:
+
+```{r compare_450k_EPIC}
+# No mismatch/INDEL
+EPIC_matches_methylated_nomismatch_14 <- EPIC_matches_methylated_nomismatch_final %>% 
+  dplyr::filter(width >= 14)
+
+EPIC_matches_unmethylated_nomismatch_final_14 <- EPIC_matches_unmethylated_nomismatch_final %>% 
+  dplyr::filter(width >= 14)
+
+EPIC_matches_methylated_mismatch_indel_final_14 <- EPIC_matches_methylated_mismatch_indel_final %>% 
+  dplyr::filter(width >= 14)
+
+EPIC_matches_unmethylated_mismatch_indel_final_14 <- EPIC_matches_unmethylated_mismatch_indel_final %>% 
+  dplyr::filter(width >= 14)
+
+crossreactive_epic <- unique(c(EPIC_matches_methylated_mismatch_indel_final_14$Probe, EPIC_matches_unmethylated_mismatch_indel_final_14$Probe))
+crossreactive_epic_methylated <- unique(c(EPIC_matches_methylated_mismatch_indel_final_14$Probe))
+crossreactive_epic_unmethylated <- unique(c(EPIC_matches_unmethylated_mismatch_indel_final_14$Probe))
+crossreactive_fullmatch <- unique(c(EPIC_matches_methylated_mismatch_indel_final_14$Probe, EPIC_matches_unmethylated_mismatch_indel_final_14$Probe))
+crossreactive_epic_sig450k <- crossreactive_epic[crossreactive_epic %in% mlma_sig$Probe]
+
+# Compare 450k/EPIC
+compare_450k_epic <- compare_tstats(mlma, mlma_EPIC, 
+                           label1 = "- 450k", label2 = "- EPIC",
+                           highlight = crossreactive_epic_sig450k,
+                           highlight_sig = FALSE, text_size = text_size, point_size = point_size)
+compare_450k_epic
+```
+
+Similarly for the test-statistics in the OOB EWAS:
+
+```{r compare_450k_EPIC_oob}
+
+crossreactive_epic_sig450k_oob <- crossreactive_epic[crossreactive_epic %in% mlma_oob_sig$Probe]
+
+# Compare 450k/EPIC
+compare_450k_epic_oob <- compare_tstats(mlma_oob %>% dplyr::rename(p = p_oob), mlma_EPIC_oob %>% dplyr::rename(p = p_oob), 
+                           label1 = "(OOB) - 450k", label2 = "(OOB) - EPIC",
+                           highlight = crossreactive_epic_sig450k_oob,
+                           highlight_sig = FALSE, text_size = text_size, point_size = point_size)
+compare_450k_epic_oob
+```
+
+
+### Enrichment
+
+```{r contingency_table_EPIC}
+tab <- matrix(c(length(intersect(mlma_EPIC_sig$Probe, crossreactive_epic)), nrow(mlma_EPIC %>% dplyr::filter(!Probe %in% c(mlma_EPIC_sig$Probe)) %>% dplyr::filter(Probe %in% crossreactive_epic)) ,
+                   length(setdiff(mlma_EPIC_sig$Probe, crossreactive_epic)), nrow(mlma_EPIC %>% dplyr::filter(!Probe %in% c(mlma_EPIC_sig$Probe, crossreactive_epic)))), nrow=2)
+rownames(tab) <- c("Significant", "Not Significant")
+colnames(tab) <- c("Cross-reactive", "Not Cross-reactive")
+tab 
+```
+
+```{r fisher_test_crossreactive_EPIC}
+fisher.test(tab)
+```
+
+
+```{r save_figures, eval = FALSE, include = FALSE}
+## EWAS
+# QQplot
+ggsave(qqplot, filename = "../data/output/figs/qqplot_mlma_loco.png",
+       dpi = 300, width = 3.0, height = 3.0 * 3/4, units = "in")
+saveRDS(qqplot, file = "../data/output/figs/qqplot_mlma_loco.rds")
+# Manhattan 
+ggsave(manhattan, filename = "../data/output/figs/manhattan_mlma_loco.png",
+       dpi = 300, width = 3.0, height = 3.0 * 3/4, units = "in")
+saveRDS(manhattan, file = "../data/output/figs/manhattan_mlma_loco.rds")
+# Sensitivity checks
+ggsave(compare_rmPCAoutliers, filename = "../data/output/figs/compare_rmPCAoutliers.png",
+       width = 3, height = 3, dpi = 300, units = "in")
+saveRDS(compare_rmPCAoutliers, file = "../data/output/figs/compare_rmPCAoutliers.rds")
+ggsave(compare_linear, filename = "../data/output/figs/compare_linear.png",
+       width = 3, height = 3, units = "in", dpi = 300)
+saveRDS(compare_linear, file = "../data/output/figs/compare_linear.rds")
+ggsave(compare_meta, filename = "../data/output/figs/compare_meta.png",
+       width = 3, height = 3, dpi = 300, units = "in")
+saveRDS(compare_meta, file = "../data/output/figs/compare_meta.rds")
+ggsave(compare_mvalues, filename = "../data/output/figs/compare_mvalues.png",
+       width = 3, height = 3, dpi = 300, units = "in")
+saveRDS(compare_mvalues, file = "../data/output/figs/compare_mvalues.rds")
+# Locus plots 
+save_locus_plots <- function(plots, path) {
+  for(i in names(plots)) {
+    ggsave(plots[[i]], filename = sprintf("%s/%s.png", path, i),
+       width = 3, height = 3, units = "in", dpi = 600)
+    ggsave(plots[[i]], filename = sprintf("%s/%s.pdf", path, i),
+       width = 3, height = 3, units = "in", dpi = 600)
+    saveRDS(plots[[i]], file = sprintf("%s/%s.rds", path, i))
+    NULL
+  }
+}
+save_locus_plots(plots = plots_c9, path = "../data/output/figs/locus_plots/c9")
+save_locus_plots(plots = plots_trans_chr9, path = "../data/output/figs/locus_plots/trans_chr9")
+save_locus_plots(plots = plots_trans_nochr9, path = "../data/output/figs/locus_plots/trans")
+
+## OOB EWAS
+ggsave(qqplot_oob, filename = "../data/output/figs/qqplot_oob.png",
+       dpi = 300, width = 3.0, height = 3.0 * 3/4, units = "in")
+saveRDS(qqplot_oob, file = "../data/output/figs/qqplot_oob.rds")
+
+ggsave(manhattan_oob, filename = "../data/output/figs/manhattan_oob.png",
+       dpi = 300, width = 3.0, height = 3.0 * 3/4, units = "in")
+saveRDS(manhattan_oob, file = "../data/output/figs/manhattan_oob.rds")
+
+# C9 match plots
+
+# No misamatch/indel
+ggsave(plot_typeI_nomismatch_noindel_correlated_methylated, 
+       filename = "../data/output/figs/c9_overlaps/typeI_nomismatch_noindel_correlated_methylated.png",
+       dpi = 300, width = 3.0, height = 3.0 * 3/4, units = "in")
+saveRDS(plot_typeI_nomismatch_noindel_correlated_methylated, file = "../data/output/figs/c9_overlaps/typeI_nomismatch_noindel_correlated_methylated.rds")
+
+# Colored by channel switch 
+ggsave(plot_typeI_nomismatch_noindel_correlated_methylated_coloredswitch, 
+       filename = "../data/output/figs/c9_overlaps/typeI_nomismatch_noindel_correlated_methylated_coloredswitch.png",
+       dpi = 300, width = 3.0, height = 3.0 * 3/4, units = "in")
+saveRDS(plot_typeI_nomismatch_noindel_correlated_methylated_coloredswitch, 
+        file = "../data/output/figs/c9_overlaps/typeI_nomismatch_noindel_correlated_methylated_coloredswitch.rds")
+
+# Updated p-values 
+ggsave(plot_typeI_nomismatch_noindel_correlated_methylated_oobpvalues, 
+       filename = "../data/output/figs/c9_overlaps/typeI_nomismatch_noindel_correlated_methylated_oobpvalues.png",
+       dpi = 300, width = 3.0, height = 3.0 * 3/4, units = "in")
+saveRDS(plot_typeI_nomismatch_noindel_correlated_methylated_oobpvalues, 
+        file = "../data/output/figs/c9_overlaps/typeI_nomismatch_noindel_correlated_methylated_oobpvalues.rds")
+
+# Updated p-values + allowed mismatch/INDEL 
+ggsave(plot_typeI_mismatch_indel_correlated_methylated_oobpvalues, 
+       filename = "../data/output/figs/c9_overlaps/typeI_mismatch_indel_correlated_methylated_oobpvalues.png",
+       dpi = 300, width = 3.0, height = 3.0 * 3/4, units = "in")
+saveRDS(plot_typeI_mismatch_indel_correlated_methylated_oobpvalues, 
+        file = "../data/output/figs/c9_overlaps/typeI_mismatch_indel_correlated_methylated_oobpvalues.rds")
+
+# Diff plot no mismatch / allow mismatch/INDEL
+ggsave(diff_plot_nomismatch_mismatch_indel, 
+       filename = "../data/output/figs/c9_overlaps/diff_plot_nomismatch_mismatch_indel.png",
+       dpi = 300, width = 3.0, height = 3.0, units = "in")
+saveRDS(diff_plot_nomismatch_mismatch_indel, 
+        file = "../data/output/figs/c9_overlaps/diff_plot_nomismatch_mismatch_indel.rds")
+
+ggsave(plot_typeI_mismatch_indel_correlated_methylated_reference, 
+       filename = "../data/output/figs/c9_overlaps/typeI_mismatch_indel_correlated_methylated_reference.png",
+       dpi = 300, width = 3.0, height = 3.0 * 3/4, units = "in")
+saveRDS(plot_typeI_mismatch_indel_correlated_methylated_reference,
+        file = "../data/output/figs/c9_overlaps/typeI_mismatch_indel_correlated_methylated_reference.rds")
+
+# T-statistics 
+ggsave(plot_typeI_mismatch_indel_methylated_tstat, 
+       filename = "../data/output/figs/c9_overlaps/typeI_mismatch_indel_methylated_tstat.png",
+       dpi = 300, width = 3.0, height = 3.0 * 3/4, units = "in")
+saveRDS(plot_typeI_mismatch_indel_methylated_tstat,
+        file = "../data/output/figs/c9_overlaps/typeI_mismatch_indel_methylated_tstat.rds")
+
+## Type II plots 
+# No mismatch/INDEL 
+ggsave(plot_typeII_nomismatch_noindel_correlated_methylated, 
+       filename = "../data/output/figs/c9_overlaps/typeII_nomismatch_noindel_correlated_methylated.png",
+       dpi = 300, width = 3.0, height = 3.0 * 3/4, units = "in")
+saveRDS(plot_typeII_nomismatch_noindel_correlated_methylated,
+        file = "../data/output/figs/c9_overlaps/typeII_nomismatch_noindel_correlated_methylated.rds")
+
+# Allow mismatch/INDEL
+ggsave(plot_typeII_mismatch_indel_correlated_methylated, 
+       filename = "../data/output/figs/c9_overlaps/typeII_mismatch_indel_correlated_methylated.png",
+       dpi = 300, width = 3.0, height = 3.0 * 3/4, units = "in")
+saveRDS(plot_typeII_mismatch_indel_correlated_methylated,
+        file = "../data/output/figs/c9_overlaps/typeII_mismatch_indel_correlated_methylated.rds")
+
+# Legend
+ggsave(legend, 
+       filename = "../data/output/figs/c9_overlaps/legend.png",
+       dpi = 300, width = 3.0, height = 3.0 * 3/4, units = "in")
+ggsave(legend, 
+       filename = "../data/output/figs/c9_overlaps/legend.pdf",
+       dpi = 300, width = 3.0, height = 3.0 * 3/4, units = "in")
+saveRDS(legend,
+        file = "../data/output/figs/c9_overlaps/legend.rds")
+
+# Legend p-values 
+ggsave(diff_plot_nomismatch_mismatch_indel_legend, 
+       filename = "../data/output/figs/c9_overlaps/diff_plot_nomismatch_mismatch_indel_legend.png",
+       dpi = 300, width = 3.0, height = 3.0 * 3/4, units = "in")
+ggsave(diff_plot_nomismatch_mismatch_indel_legend, 
+       filename = "../data/output/figs/c9_overlaps/diff_plot_nomismatch_mismatch_indel_legend.pdf",
+       dpi = 300, width = 3.0, height = 3.0 * 3/4, units = "in")
+saveRDS(diff_plot_nomismatch_mismatch_indel_legend,
+        file = "../data/output/figs/c9_overlaps/diff_plot_nomismatch_mismatch_indel_legend.rds")
+
+
+### Enrichments
+# OR_plot
+ggsave(ORs_plot, 
+       filename = "../data/output/figs/ORs_plot.png",
+       dpi = 300, width = 3.0, height = 3.0 * 3/4, units = "in")
+saveRDS(ORs_plot,
+        file = "../data/output/figs/ORs_plot.rds")
+
+# Ref table 
+readr::write_csv(tab_reference, "../data/output/tables/table_crossreactive_reference.csv")
+
+
+## Manhattan plots, highlight cross-reactive probes  
+ggsave(manhattan_hlightcrossreactive, 
+       filename = "../data/output/figs/manhattan_hlightcrossreactive.png",
+       dpi = 300, width = 3.0, height = 3.0 * 3/4, units = "in")
+saveRDS(manhattan_hlightcrossreactive,
+        file = "../data/output/figs/manhattan_hlightcrossreactive.rds")
+
+ggsave(manhattan_oob_hlightcrossreactive, 
+       filename = "../data/output/figs/manhattan_oob_hlightcrossreactive.png",
+       dpi = 300, width = 3.0, height = 3.0 * 3/4, units = "in")
+saveRDS(manhattan_oob_hlightcrossreactive,
+        file = "../data/output/figs/manhattan_oob_hlightcrossreactive.rds")
+
+## Sensitivity analyses
+
+# Unmethylated vs. Methylated
+# Type I
+ggsave(diff_plot_unmethylated_methylated_typeI, 
+       filename = "../data/output/figs/c9_overlaps/diff_plot_unmethylated_methylated_typeI.png",
+       dpi = 600, width = 3.0, height = 3.0 * 3/4, units = "in")
+saveRDS(diff_plot_unmethylated_methylated_typeI,
+        file = "../data/output/figs/c9_overlaps/diff_plot_unmethylated_methylated_typeI.rds")
+
+# Type II
+ggsave(diff_plot_unmethylated_methylated_typeII, 
+       filename = "../data/output/figs/c9_overlaps/diff_plot_unmethylated_methylated_typeII.png",
+       dpi = 600, width = 3.0, height = 3.0 * 3/4, units = "in")
+saveRDS(diff_plot_unmethylated_methylated_typeII,
+        file = "../data/output/figs/c9_overlaps/diff_plot_unmethylated_methylated_typeII.rds")
+
+## YpG
+# type I methylated
+ggsave(diff_plot_methylated_YpG_mismatch_indel2_2, 
+       filename = "../data/output/figs/c9_overlaps/diff_plot_methylated_YpG_mismatch_indel_typeI.png",
+       dpi = 300, width = 3.0, height = 3.0 * 3/4, units = "in")
+saveRDS(diff_plot_methylated_YpG_mismatch_indel2_2,
+        file = "../data/output/figs/c9_overlaps/diff_plot_methylated_YpG_mismatch_indel_typeI.rds")
+
+# type I unmethylated
+ggsave(diff_plot_unmethylated_YpG_mismatch_indel2_2, 
+       filename = "../data/output/figs/c9_overlaps/diff_plot_unmethylated_YpG_mismatch_indel_typeI.png",
+       dpi = 300, width = 3.0, height = 3.0 * 3/4, units = "in")
+saveRDS(diff_plot_unmethylated_YpG_mismatch_indel2_2,
+        file = "../data/output/figs/c9_overlaps/diff_plot_unmethylated_YpG_mismatch_indel_typeI.rds")
+
+# type II unmethylated
+ggsave(diff_plot_typeII_unmethylated_YpG_mismatch_indel2_2, 
+       filename = "../data/output/figs/c9_overlaps/diff_plot_unmethylated_YpG_mismatch_indel_typeII.png",
+       dpi = 300, width = 3.0, height = 3.0 * 3/4, units = "in")
+saveRDS(diff_plot_typeII_unmethylated_YpG_mismatch_indel2_2,
+        file = "../data/output/figs/c9_overlaps/diff_plot_unmethylated_YpG_mismatch_indel_typeII.rds")
+
+# type II methylated
+ggsave(diff_plot_typeII_methylated_YpG_mismatch_indel2_2, 
+       filename = "../data/output/figs/c9_overlaps/diff_plot_methylated_YpG_mismatch_indel_typeII.png",
+       dpi = 300, width = 3.0, height = 3.0 * 3/4, units = "in")
+saveRDS(diff_plot_typeII_methylated_YpG_mismatch_indel2_2,
+        file = "../data/output/figs/c9_overlaps/diff_plot_methylated_YpG_mismatch_indel_typeII.rds")
+
+## Include flanking regions
+ggsave(diff_plot_flanking_both, 
+       filename = "../data/output/figs/c9_overlaps/diff_plot_all_mismatch_indel_includeflanking.png",
+       dpi = 300, width = 3.0, height = 3.0 * 3/4, units = "in")
+saveRDS(diff_plot_flanking_both,
+        file = "../data/output/figs/c9_overlaps/diff_plot_all_mismatch_indel_includeflanking.rds")
+
+## mismatch/Indel >=3bp
+ggsave(diff_plot_3bp_both, 
+       filename = "../data/output/figs/c9_overlaps/diff_plot_all_mismatch_indel_3bp.png",
+       dpi = 300, width = 3.0, height = 3.0 * 3/4, units = "in")
+saveRDS(diff_plot_3bp_both,
+        file = "../data/output/figs/c9_overlaps/diff_plot_all_mismatch_indel_3bp.rds")
+
+## mismatch/indel >=1 bp
+ggsave(diff_plot_0bp_both, 
+       filename = "../data/output/figs/c9_overlaps/diff_plot_all_mismatch_indel_0bp.png",
+       dpi = 300, width = 3.0, height = 3.0 * 3/4, units = "in")
+saveRDS(diff_plot_0bp_both,
+        file = "../data/output/figs/c9_overlaps/diff_plot_all_mismatch_indel_0bp.rds")
+
+
+
+## Total intensities 
+ggsave(compare_mlma_total,
+       filename = "../data/output/figs/compare_EWAS_beta_EWAS_total.png",
+       dpi = 300, width = 3.0, height = 3.0, units = "in")
+saveRDS(compare_mlma_total,
+        file = "../data/output/figs/compare_EWAS_beta_EWAS_total.rds")
+
+ggsave(compare_mlma_total_oob,
+       filename = "../data/output/figs/compare_EWAS_beta_EWAS_total_oob.png",
+       dpi = 300, width = 3.0, height = 3.0, units = "in")
+saveRDS(compare_mlma_total_oob,
+        file = "../data/output/figs/compare_EWAS_beta_EWAS_total_oob.rds")
+
+## Betas
+ggsave(beta_plot_ib,
+       filename = "../data/output/figs/beta_plot_ib.png",
+       dpi = 300, width = 4, height = 3.0, units = "in")
+saveRDS(beta_plot_ib,
+        file = "../data/output/figs/beta_plot_ib.rds")
+
+ggsave(beta_plot_ib_legend,
+       filename = "../data/output/figs/beta_plot_ib_legend.pdf",
+       dpi = 600, width = 4, height = 3.0, units = "in")
+
+ggsave(beta_plot_oob,
+       filename = "../data/output/figs/beta_plot_oob.png",
+       dpi = 300, width = 4, height = 3.0, units = "in")
+saveRDS(beta_plot_oob,
+        file = "../data/output/figs/beta_plot_oob.rds")
+
+## EPIC replication.
+ggsave(compare_450k_epic,
+       filename = "../data/output/figs/compare_450k_epic.png",
+       dpi = 300, width = 3.0, height = 3.0, units = "in")
+saveRDS(compare_450k_epic,
+        file = "../data/output/figs/compare_450k_epic.rds")
+
+ggsave(compare_450k_epic_oob,
+       filename = "../data/output/figs/compare_450k_epic_oob.png",
+       dpi = 300, width = 3.0, height = 3.0, units = "in")
+saveRDS(compare_450k_epic_oob,
+        file = "../data/output/figs/compare_450k_epic_oob.rds")
+
+# Manhattan
+ggsave(manhattan_EPIC,
+       filename = "../data/output/figs/manhattan_EPIC.png",
+       dpi = 300, width = 3.0, height = 3.0 * 3/4, units = "in")
+
+saveRDS(manhattan_EPIC,
+        file = "../data/output/figs/manhattan_EPIC.rds")
+
+# QQplot
+ggsave(qqplot_EPIC,
+       filename = "../data/output/figs/qqplot_EPIC.png",
+       dpi = 300, width = 3.0, height = 3.0 * 3/4, units = "in")
+
+saveRDS(qqplot_EPIC,
+        file = "../data/output/figs/qqplot_EPIC.rds")
+```
+
+```{r, eval = FALSE}
+## Save tables
+```{r save_tables_etc, eval=FALSE, include=FALSE}
+readr::write_csv(probe_sequences_, path = "../data/output/tables/probe_sequences_trans.csv")
+readr::write_csv(pop, "../data/output/tables/study_population.csv")
+```
