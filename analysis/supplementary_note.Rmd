@@ -16,8 +16,16 @@ bibliography: Paper.bib
 knitr::opts_chunk$set(echo = TRUE, cache = TRUE)
 ```
 
-```{r data, include = FALSE}
+```{r packages, include = FALSE}
 library(tidyverse)
+library(DNAmCrosshyb)
+library(wateRmelon)
+library(minfi)
+library(wateRmelon)
+library(minfi)
+```
+
+```{r data, include = FALSE}
 # MLMA results 
 mlma <- read_tsv("../data/output/ewas/mlma_loco_c9_covarsexbatch_qcovaragesmoking_missing0.05.loco.mlma")
 mlma_oob <- read_tsv("../data/output/ewas/mlma_moa_c9_covarsexbatch_qcovaragesmoking_oob.mlma")
@@ -37,6 +45,11 @@ beta <- readRDS("../data/processed/beta_mlma_c9_loco_sig.rds")
 # Subset of the beta-matrix (significant probes)
 samplesheet_c9mutated <- samplesheet %>% dplyr::filter(Inferred_C9_status == "long")
 beta_sig <- beta[mlma_sig$Probe,samplesheet_c9mutated$Sample_Name]
+
+# External data
+zhou_450k <- read_tsv("../data/extdata/HM450.hg19.manifest.tsv.gz")
+zhou_EPIC <- read_tsv("../data/extdata/EPIC.hg19.manifest.tsv.gz")
+zhou_450k_pop <- read_tsv("../data/extdata/HM450.hg19.manifest.pop.tsv.gz")
 ```
 
 ### Introduction
@@ -71,9 +84,7 @@ Zhou annotations:
 
 ```{r zhou_annotation, message = FALSE}
 path_zhou_hg38 <- "http://zwdzwd.io/InfiniumAnnotation/20180909/HM450/HM450.hg38.manifest.tsv.gz"
-path_zhou_cn <- "http://zwdzwd.io/InfiniumAnnotation/20180909/HM450/HM450.hg38.3sub.copynumber.tsv.gz"
 zhou_hg38 <- readr::read_tsv(path_zhou_hg38)
-zhou_cn <- readr::read_tsv(path_zhou_cn)
 ```
 
 ```{r zhou_hg38, message = FALSE}
@@ -87,7 +98,6 @@ zhou_hg38 %>% dplyr::select(probeID, MASK_sub30_copy, MASK_mapping) %>%
 Mapping probes to a non-reference sequence using the `DNAmCrosshyb` package (GGCCC hexanucleotide repeat)
 
 ```{r map_probes_c9, cache = TRUE, message = FALSE}
-library(DNAmCrosshyb)
 # Map probes to the C9orf72 hexanucleotide repeat
 repeat_sequence <- paste(rep("GGCCCC", 10), collapse="")
 
@@ -96,13 +106,13 @@ matches_c9 <- map_probes_sequence(sequence = repeat_sequence, next_base = "G", p
                             max_width = 25, allow_indel = FALSE, 
                             allow_mismatch = FALSE, step_size = 1, 
                             use_Y = FALSE, methylation_status = "methylated")
+
 data.frame(matches_c9 %>% dplyr::arrange(desc(width))) %>% head()
 ```
 
 Mapping probes to several disease-associated repeat-sequences:
 
 ```{r, warning = FALSE, message = FALSE, cache = TRUE}
-library(DNAmCrosshyb)
 ## run for several sequences 
 sequences <- list(
   ATTCT = list(
@@ -158,8 +168,8 @@ names(matches_all) <- names(sequences)
 
 # Check number of probes with >=14bp match for each sequence 
 # Check if filtered by zhou et al 
-zhou <- readr::read_tsv("../data/extdata/hm450.hg38.manifest.tsv.gz")
-zhou <- zhou %>% dplyr::filter(MASK_sub30_copy | MASK_mapping)
+#zhou <- readr::read_tsv("../data/extdata/hm450.hg38.manifest.tsv.gz")
+zhou <- zhou_450k %>% dplyr::filter(MASK_sub30_copy | MASK_mapping)
 make_overview <- function(sequence, matches_all) {
   check <- matches_all[[sequence]] %>% dplyr::filter(width >= 14)
   tibble(sequence = sequence, n_cr = dplyr::n_distinct(check$Probe), 
@@ -191,7 +201,6 @@ head(matches %>% dplyr::arrange(desc(width)) %>% data.frame())
 Number of matches per probe:
 
 ```{r nr_matches_per_probe, cache = TRUE}
-library(DNAmCrosshyb)
 nr_matches <- get_nr_matches_per_probe(matches)
 nr_matches
 ```
@@ -199,7 +208,6 @@ nr_matches
 Overlap between off-target matches and repeat sequences:
 
 ```{r repeat_overlap, cache = FALSE, message = FALSE, warning = FALSE}
-library(DNAmCrosshyb)
 matches <- find_repeat_overlaps(matches, genome_build = "hg19", min_overlap = "any")
 head(matches %>% data.frame())
 ```
@@ -224,7 +232,6 @@ The middle block consists of four probes that are all located within the same re
 
 ```{r heatmap}
 # Heatmap
-library(pheatmap)
 pal <- viridis::viridis(n = 200)
 breaksList = seq(-1,1, by = 0.01)
 heatmap <- pheatmap(cor(t(beta_sig), use = "complete.obs"),
@@ -243,7 +250,6 @@ This point is related to the previous one: it is suspicious when significant sit
 The `get_probe_overlaps` function in the `DNAmCrosshyb` package can be used to check for overlapping 3'-subsequences in a set of probes. Here we apply this function to the probes that were significant in the C9 EWAS. We found that all *trans* probes that were correlated had a >=10bp overlap with each other. 
 
 ```{r get_probe_overlaps}
-library(DNAmCrosshyb)
 overlaps <- get_probe_overlaps(c(mlma_sig$Probe, mlma_oob_sig$Probe))
 overlaps %>% dplyr::arrange(desc(overlaps$overlap))
 ```
@@ -288,8 +294,6 @@ The `locusplot()` function from the `DNAmCrossHyb` package can be used to plot a
 First, we show a locus plot of the C9 island, which is very likely to be a true positive (found in different studies/tissues/techniques). Here, there is a regional effect, strengthening the evidence for a real biological effect:
 
 ```{r locus_plot, fig.height = 4, fig.width = 6}
-library(DNAmCrosshyb)
-
 # First an example of probes in the C9 island, 
 # these probes are very likely to be true positives (found in different # studies/tissues/techniques)
 locusplot("cg05990720", stats = mlma, 
@@ -347,8 +351,7 @@ Extracting total signal intensities:
 
 ```{r get_signal_intensities, eval = FALSE}
 # In-band 
-library(wateRmelon)
-library(minfi)
+
 
 # Extract total signal intensities after normalization using dasen
 rgset <- dasen(rgset)

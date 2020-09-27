@@ -16,10 +16,11 @@ knitr::opts_chunk$set(echo = FALSE, cache = TRUE, cache.lazy = FALSE, warning=FA
 library(tidyverse)
 library(ggsci)
 library(IlluminaHumanMethylation450kanno.ilmn12.hg19)
+library(IlluminaHumanMethylationEPICanno.ilm10b2.hg19)
 library(FDb.InfiniumMethylation.hg19)
 library(pheatmap)
 library(magrittr)
-library(colorblindr)
+library(colorblindr) # install: remotes::install_github("clauswilke/colorblindr")
 
 # Source EWAS functions
 source("../R/ewas_plot_functions.R")
@@ -40,6 +41,8 @@ point_size = 3
 ```
 
 ```{r data, include = FALSE, cache=FALSE}
+## 450k 
+
 # MLMA results 
 mlma <- read_tsv("../data/output/ewas/mlma_loco_c9_covarsexbatch_qcovaragesmoking_missing0.05.loco.mlma")
 mlma_oob <- read_tsv("../data/output/ewas/mlma_moa_c9_covarsexbatch_qcovaragesmoking_oob.mlma")
@@ -47,6 +50,10 @@ mlma <- mlma %>% dplyr::mutate(t = b / se)
 mlma_oob <- mlma_oob %>% 
   dplyr::rename(p_oob = p) %>%
   dplyr::mutate(t_oob = b / se)
+
+### Significant sites
+mlma_sig <- mlma %>% dplyr::filter(p < 0.05/nrow(.))
+mlma_oob_sig <- mlma_oob %>% dplyr::filter(p_oob < 0.05/nrow(.))
 
 ## Sensitivity analysees
 mlma_linear <- readr::read_tsv("../data/output/ewas/mlma_linear_c9_covarsexbatch_qcovaragesmokingcellcounts5controlPCs5PCs_missing0.05.linear")
@@ -189,10 +196,63 @@ matches_YpG_nomismatch_final <- matches_YpG_nomismatch_final %>%
 matches_YpG_mismatch_indel_final <- matches_YpG_mismatch_indel_final %>%
   dplyr::left_join(mlma[,c("Probe", "cistrans")], by = "Probe")
 
-### Significant sites
-mlma_sig <- mlma %>% dplyr::filter(p < 0.05/nrow(.))
-mlma_oob_sig <- mlma_oob %>% dplyr::filter(p_oob < 0.05/nrow(.))
 
+## Sensitivity analyses
+# Load matches (methylated)
+matches_methylated_nomismatch_includeflanking_final <- readRDS("../data/processed/c9_matches/450k_matches_methylated_nomismatch_includeflanking_final_start1bp.rds")
+matches_methylated_mismatch_indel_includeflanking_final <- readRDS("../data/processed/c9_matches/450k_matches_methylated_mismatch_indel_includeflanking_final.rds")
+
+# Load matches (unmethylated)
+matches_unmethylated_nomismatch_includeflanking_final <- readRDS("../data/processed/c9_matches/450k_matches_unmethylated_nomismatch_includeflanking_final_start1bp.rds")
+matches_unmethylated_mismatch_indel_includeflanking_final <- readRDS("../data/processed/c9_matches/450k_matches_unmethylated_mismatch_indel_includeflanking_final.rds")
+
+# Load data
+matches_methylated_mismatch_indel_0bp_final <- readRDS("../data/processed/c9_matches/450k_matches_methylated_mismatch_indel_0bp_final.rds")
+matches_unmethylated_mismatch_indel_0bp_final <- readRDS("../data/processed/c9_matches/450k_matches_unmethylated_mismatch_indel_0bp_final.rds")
+
+
+## EPIC
+
+# MLMA results (linear)
+mlma_EPIC <- read_tsv("../data/output/ewas/mlma_EPIC_linear_c9_covarsexbatch_qcovaragecellcounts5PCs5controlPCs_missing0.05.linear")
+mlma_EPIC_oob <- read_tsv("../data/output/ewas/mlma_EPIC_linear_c9_covarsexbatch_qcovaragecellcounts5PCs5controlPCs_oob.linear")
+
+## Matches
+EPIC_matches_methylated_nomismatch_final <- readRDS("../data/processed/c9_matches/EPIC_matches_methylated_nomismatch_final.rds")
+EPIC_matches_unmethylated_nomismatch_final <- readRDS("../data/processed/c9_matches/EPIC_matches_unmethylated_nomismatch_final.rds")
+EPIC_matches_methylated_mismatch_indel_final <- readRDS("../data/processed/c9_matches/EPIC_matches_methylated_mismatch_indel_final.rds")
+EPIC_matches_unmethylated_mismatch_indel_final <- readRDS("../data/processed/c9_matches/EPIC_matches_unmethylated_mismatch_indel_final.rds")
+
+## External data
+
+## Published lists of cross-reactive probes
+# Chen
+# Downloaded from: https://github.com/Jfortin1/funnorm_repro/blob/master/bad_probes/48639-non-specific-probes-Illumina450k.xlsx
+chen <- readxl::read_excel("../data/extdata/48639-non-specific-probes-Illumina450k.xlsx")
+
+# Zhou et al. annotations
+# Downloads: (downloaded at 17/09/2020)
+# wget http://zwdzwd.io/InfiniumAnnotation/current/EPIC/EPIC.hg19.manifest.tsv.gz
+# wget http://zwdzwd.io/InfiniumAnnotation/current/HM450/HM450.hg19.manifest.tsv.gz
+
+zhou_450k <- read_tsv("../data/extdata/HM450.hg19.manifest.tsv.gz")
+zhou_450k <- zhou_450k %>% dplyr::filter(MASK_sub30_copy | MASK_mapping)
+
+zhou_EPIC <- read_tsv("../data/extdata/EPIC.hg19.manifest.tsv.gz")
+zhou_EPIC <- zhou_EPIC %>% dplyr::filter(MASK_sub30_copy | MASK_mapping)
+
+# Naeem 
+# Downloaded from: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3943510/
+naeem <- read_csv("../data/extdata/12864_2013_7006_MOESM2_ESM.csv")
+naeem <- naeem %>% dplyr::filter(MultiMap == 1 | Repeat == 1)
+
+## Other
+
+## Sequence overlap between 450/EPIC probes and varying repeat sequences
+matches_450k_commonrepeats_methylated <- readRDS("../data/misc/matches_repeat_sequences_10_35_methylated_allowmismatch_allowINDEL_450k.rds")
+matches_450k_commonrepeats_unmethylated <- readRDS("../data/misc/matches_repeat_sequences_10_35_unmethylated_allowmismatch_allowINDEL_450k.rds")
+matches_EPIC_commonrepeats_methylated <- readRDS("../data/misc/matches_repeat_sequences_10_35_methylated_allowmismatch_allowINDEL_EPIC.rds")
+matches_EPIC_commonrepeats_unmethylated <- readRDS("../data/misc/matches_repeat_sequences_10_35_unmethylated_allowmismatch_allowINDEL_EPIC.rds")
 ```
 
 ## Data 
@@ -847,20 +907,8 @@ ORs_plot
 We checked how many of the identified cross-reactive probes were flagged in previous studies (Chen *et al.*, Naeem *et al.*, Zhou *et al.*):
 
 ```{r plot_mismatch_indel_typeI_reference}
-# Chen
-chen <- readxl::read_excel("../data/extdata/48639-non-specific-probes-Illumina450k.xlsx")
-
-# Zhou 
-zhou <- read_tsv("../data/extdata/hm450.hg38.manifest.tsv.gz")
-zhou <- zhou %>% dplyr::filter(MASK_sub30_copy, MASK_mapping)
-
-# Naeem
-naeem <- read_csv("../data/extdata/12864_2013_7006_MOESM2_ESM.csv")
-naeem <- naeem %>% dplyr::filter(MultiMap == 1 | Repeat == 1)
-
-
 plot_typeI_mismatch_indel_correlated_methylated_reference <- matches_methylated_mismatch_indel_final %>% 
-  dplyr::mutate(previously_flagged = ifelse(Probe %in% c(chen$TargetID, zhou$probeID, naeem$probe), TRUE, FALSE)) %>%
+  dplyr::mutate(previously_flagged = ifelse(Probe %in% c(chen$TargetID, zhou_450k$probeID, naeem$probe), TRUE, FALSE)) %>%
   dplyr::filter(!is.na(cistrans)) %>%
   dplyr::filter(Type == "I") %>%
   ggplot(aes(x = width, y = -log10(p_updated), color = previously_flagged, shape = cistrans)) +
@@ -879,19 +927,19 @@ plot_typeI_mismatch_indel_correlated_methylated_reference +  theme(legend.positi
 ```
 
 ```{r overlap_reference_lists}
-crossreactive_reference <- unique(c(chen$TargetID, zhou$probeID, naeem$probe))
+crossreactive_reference <- unique(c(chen$TargetID, zhou_450k$probeID, naeem$probe))
 mlma_sig_crossreactive <- mlma_sig %>% dplyr::filter(Probe %in% crossreactive_probes_methylated)
 
 tab_reference <- tibble(reference = c("Chen et al.", "Naeem et al.", "Zhou et al.", "Total"), 
               nr_crossreactive = c(sum(crossreactive_probes_methylated %in% chen$TargetID), 
                                    sum(crossreactive_probes_methylated %in% naeem$probe),
-                                   sum(crossreactive_probes_methylated %in% zhou$probeID),
+                                   sum(crossreactive_probes_methylated %in% zhou_450k$probeID),
                                    sum(crossreactive_probes_methylated %in% crossreactive_reference)
                                    ),
               total_cross_reactive = rep(length(crossreactive_probes_methylated),4),
               nr_crossreactive_sig = c(sum(mlma_sig_crossreactive$Probe %in% chen$TargetID),
                                        sum(mlma_sig_crossreactive$Probe %in% naeem$probe),
-                                       sum(mlma_sig_crossreactive$Probe %in% zhou$probeID),
+                                       sum(mlma_sig_crossreactive$Probe %in% zhou_450k$probeID),
                                        sum(mlma_sig_crossreactive$Probe %in% crossreactive_reference)
                                        ),
               nr_crossreactive_sig_total = rep(nrow(mlma_sig_crossreactive), 4))
@@ -1154,10 +1202,6 @@ diff_plot_typeII_methylated_YpG_mismatch_indel2_2 + theme(legend.position="right
 Here test whether including the regions flanking the C9 repeat (50bp on both sides), leads to increased matches:
 
 ```{r include_flanking_methylated}
-
-# Load matches (methylated)
-matches_methylated_nomismatch_includeflanking_final <- readRDS("../data/processed/c9_matches/450k_matches_methylated_nomismatch_includeflanking_final_start1bp.rds")
-matches_methylated_mismatch_indel_includeflanking_final <- readRDS("../data/processed/c9_matches/450k_matches_methylated_mismatch_indel_includeflanking_final.rds")
 matches_methylated_nomismatch_includeflanking_final_max5 <- matches_methylated_nomismatch_includeflanking_final %>%
   dplyr::filter(width <= 5)
 matches_methylated_nomismatch_includeflanking_final_max5 <- matches_methylated_nomismatch_includeflanking_final_max5  %>%
@@ -1187,9 +1231,7 @@ matches_methylated_mismatch_indel_includeflanking_final <- matches_methylated_mi
 matches_methylated_mismatch_indel_includeflanking_final <- matches_methylated_mismatch_indel_includeflanking_final %>%
   dplyr::left_join(mlma[,c("Probe", "cistrans")], by = "Probe")
 
-# Load matches (unmethylated)
-matches_unmethylated_nomismatch_includeflanking_final <- readRDS("../data/processed/c9_matches/450k_matches_unmethylated_nomismatch_includeflanking_final_start1bp.rds")
-matches_unmethylated_mismatch_indel_includeflanking_final <- readRDS("../data/processed/c9_matches/450k_matches_unmethylated_mismatch_indel_includeflanking_final.rds")
+
 matches_unmethylated_nomismatch_includeflanking_final_max5 <- matches_unmethylated_nomismatch_includeflanking_final %>%
   dplyr::filter(width <= 5)
 matches_unmethylated_nomismatch_includeflanking_final_max5 <- matches_unmethylated_nomismatch_includeflanking_final_max5  %>%
@@ -1310,9 +1352,7 @@ As shown previously, one significant probe remains that would have a considerabl
 
 
 ```{r mismatch_indel_0bp}
-# Load data
-matches_methylated_mismatch_indel_0bp_final <- readRDS("../data/processed/c9_matches/450k_matches_methylated_mismatch_indel_0bp_final.rds")
-matches_unmethylated_mismatch_indel_0bp_final <- readRDS("../data/processed/c9_matches/450k_matches_unmethylated_mismatch_indel_0bp_final.rds")
+
 
 
 matches_methylated_mismatch_indel_0bp_final_14bp <- matches_methylated_mismatch_indel_0bp_final %>%
@@ -1449,10 +1489,12 @@ These results may be confounded by signal saturation effects, that is, for some 
 total_sig <- total %>% dplyr::filter(p < 0.05 / nrow(.))
 total_oob_sig <- total_oob %>% dplyr::filter(p < 0.05 / nrow(.))
 samplesheet <- samplesheet %>% dplyr::filter(Pheno == 2, !is.na(Inferred_C9_status))
-beta_sig_total_sig <- beta[rownames(beta) %in% total_sig$Probe & rownames(beta) %in% crossreactive_probes_combined, samplesheet$Sample_Name]
-beta_oob_sig_total_sig <- beta_oob[rownames(beta_oob) %in% total_oob_sig$Probe & rownames(beta_oob) %in% crossreactive_probes_combined,samplesheet$Sample_Name]
-samplesheet_ib <- cbind(samplesheet, t(beta_sig_total_sig))
-samplesheet_oob <- cbind(samplesheet, t(beta_oob_sig_total_sig))
+beta_sig <- beta[rownames(beta) %in% mlma_sig$Probe, samplesheet$Sample_Name]
+beta_oob_sig<- beta_oob[rownames(beta_oob) %in% mlma_oob_sig$Probe,samplesheet$Sample_Name]
+# beta_sig_total_sig <- beta[rownames(beta) %in% total_sig$Probe & rownames(beta) %in% crossreactive_probes_combined, samplesheet$Sample_Name]
+
+samplesheet_ib <- cbind(samplesheet, t(beta_sig))
+samplesheet_oob <- cbind(samplesheet, t(beta_oob_sig))
 
 beta_plot_ib <- samplesheet_ib %>%
   dplyr::rename(C9_status = Inferred_C9_status) %>%
@@ -1461,7 +1503,7 @@ beta_plot_ib <- samplesheet_ib %>%
     C9_status == "wt" ~ "wild-type",
     TRUE ~ NA_character_
   )) %>%
-  tidyr::gather(key = "Probe", value = "beta", dplyr::starts_with("cg")) %>%
+  tidyr::gather(key = "Probe", value = "beta", intersect(total_sig$Probe, intersect(mlma_sig$Probe, crossreactive_probes_combined))) %>%
   ggplot(aes(x = Probe, y = beta, fill = C9_status)) +
   geom_hline(yintercept = 0.5 , linetype = "dashed") +
   geom_boxplot(position = "dodge", outlier.shape = NA) +
@@ -1478,7 +1520,7 @@ beta_plot_ib_legend <- samplesheet_ib %>%
     C9_status == "wt" ~ "wild-type",
     TRUE ~ NA_character_
   )) %>%
-  tidyr::gather(key = "Probe", value = "beta", dplyr::starts_with("cg")) %>%
+  tidyr::gather(key = "Probe", value = "beta", intersect(total_sig$Probe, intersect(mlma_sig$Probe, crossreactive_probes_combined))) %>%
   ggplot(aes(x = Probe, y = beta, fill = C9_status)) +
   geom_hline(yintercept = 0.5 , linetype = "dashed") +
   geom_boxplot(position = "dodge", outlier.shape = NA) +
@@ -1497,7 +1539,7 @@ beta_plot_oob <- samplesheet_oob %>%
     C9_status == "wt" ~ "wild-type",
     TRUE ~ NA_character_
   )) %>%
-  tidyr::gather(key = "Probe", value = "beta", dplyr::starts_with("cg")) %>%
+  tidyr::gather(key = "Probe", value = "beta", intersect(total_oob_sig$Probe, intersect(mlma_oob_sig$Probe, crossreactive_probes_combined))) %>%
   ggplot(aes(x = Probe, y = beta, fill = C9_status)) +
   geom_hline(yintercept = 0.5 , linetype = "dashed") +
   geom_boxplot(position = "dodge", outlier.shape = NA) +
@@ -1508,24 +1550,80 @@ beta_plot_oob <- samplesheet_oob %>%
         legend.position = "none")
 beta_plot_oob
 ```
+### Beta density plots
 
+in-band:
+
+```{r}
+sig_cr <- mlma_sig %>% arrange(p) %>% filter(Probe %in% crossreactive_probes_combined) %$% Probe
+
+## Calculate median for each probe
+medians <- samplesheet_ib %>%
+  tidyr::gather(key = "Probe", value = "beta", sig_cr) %>%
+  dplyr::filter(Probe %in% sig_cr) %>%
+  dplyr::group_by(Probe, Inferred_C9_status) %>%
+  dplyr::summarize(median = median(beta,na.rm=TRUE)
+  )
+
+densities_ib <- samplesheet_ib %>%
+  dplyr::rename(C9_status = Inferred_C9_status) %>%
+  tidyr::gather(key = "Probe", value = "beta", sig_cr) %>%
+  dplyr::mutate(Probe = factor(Probe, levels = sig_cr)) %>%
+  ggplot(aes(x = beta, fill = C9_status)) +
+  geom_density(alpha=0.6) +
+  geom_vline(data = medians %>% dplyr::ungroup() %>% dplyr::mutate(Probe=factor(Probe, levels=sig_cr)) %>% dplyr::rename(C9_status = Inferred_C9_status), aes(xintercept = median), linetype="dashed") +
+  theme_classic() +
+  colorblindr::scale_fill_OkabeIto() +
+  colorblindr::scale_color_OkabeIto() +
+  xlab("\u03B2-value") +
+  theme(
+    axis.text.x = element_text(size = text_size-2, hjust=1, angle=45),
+    text = element_text(size = text_size)
+    ) +
+  facet_wrap(~Probe, scales = "free")
+densities_ib
+```
+out-of-band:
+
+```{r}
+sig_cr_oob <- mlma_oob_sig %>% dplyr::rename(p = p_oob) %>% arrange(p) %>% filter(Probe %in% crossreactive_probes_combined) %$% Probe
+
+## Calculate median for each probe
+medians <- samplesheet_oob %>%
+  tidyr::gather(key = "Probe", value = "beta", sig_cr_oob) %>%
+  dplyr::filter(Probe %in% sig_cr_oob) %>%
+  dplyr::group_by(Probe, Inferred_C9_status) %>%
+  dplyr::summarize(median = median(beta,na.rm=TRUE)
+  )
+
+densities_oob <- samplesheet_oob %>%
+  dplyr::rename(C9_status = Inferred_C9_status) %>%
+  tidyr::gather(key = "Probe", value = "beta", sig_cr_oob) %>%
+  dplyr::mutate(Probe = factor(Probe, levels = sig_cr_oob)) %>%
+  ggplot(aes(x = beta, fill = C9_status)) +
+  geom_density(alpha=0.6) +
+  geom_vline(data = medians %>% dplyr::ungroup() %>% dplyr::mutate(Probe=factor(Probe, levels=sig_cr_oob)) %>% dplyr::rename(C9_status = Inferred_C9_status), aes(xintercept = median), linetype="dashed") +
+  theme_classic() +
+  colorblindr::scale_fill_OkabeIto() +
+  colorblindr::scale_color_OkabeIto() +
+  xlab("\u03B2-value") +
+  theme(
+    axis.text.x = element_text(size = text_size-2, hjust=1, angle=45),
+    text = element_text(size = text_size),
+    ) +
+  facet_wrap(~Probe, scales = "free")
+densities_oob
+```
 
 ## EPIC replication set 
 
 ```{r data_EPIC, include = FALSE}
 ##### EPIC ######
-library(IlluminaHumanMethylationEPICanno.ilm10b2.hg19)
 data(IlluminaHumanMethylationEPICanno.ilm10b2.hg19)
 
 # Annotation
 annoEPIC <- as.data.frame(getAnnotation(IlluminaHumanMethylationEPICanno.ilm10b2.hg19))
 
-# Samplesheet
-samplesheet_EPIC <- readRDS("../data/raw/samplesheet_UK_2017.06_383samples_Ireland_2017.03_298samples_cleaned.rds")
-
-# MLMA results (linear)
-mlma_EPIC <- read_tsv("../data/output/ewas/mlma_EPIC_linear_c9_covarsexbatch_qcovaragecellcounts5PCs5controlPCs_missing0.05.linear")
-mlma_EPIC_oob <- read_tsv("../data/output/ewas/mlma_EPIC_linear_c9_covarsexbatch_qcovaragecellcounts5PCs5controlPCs_oob.linear")
 mlma_EPIC_oob <- mlma_EPIC_oob %>% 
   dplyr::mutate(t = b / se) %>%
   dplyr::rename(p_oob = p,
@@ -1542,11 +1640,6 @@ mlma_EPIC <- mlma_EPIC %>%
 mlma_EPIC <- mlma_EPIC %>% dplyr::mutate(t = b / se)
 mlma_EPIC_sig <- mlma_EPIC %>% dplyr::filter(p < 0.05/nrow(.))
 
-## Matches
-EPIC_matches_methylated_nomismatch_final <- readRDS("../data/processed/c9_matches/EPIC_matches_methylated_nomismatch_final.rds")
-EPIC_matches_unmethylated_nomismatch_final <- readRDS("../data/processed/c9_matches/EPIC_matches_unmethylated_nomismatch_final.rds")
-EPIC_matches_methylated_mismatch_indel_final <- readRDS("../data/processed/c9_matches/EPIC_matches_methylated_mismatch_indel_final.rds")
-EPIC_matches_unmethylated_mismatch_indel_final <- readRDS("../data/processed/c9_matches/EPIC_matches_unmethylated_mismatch_indel_final.rds")
 
 ## Add p-values (normal + oob)
 EPIC_matches_methylated_nomismatch_final <- EPIC_matches_methylated_nomismatch_final %>% 
@@ -1609,7 +1702,7 @@ EPIC_matches_methylated_mismatch_indel_final <- EPIC_matches_methylated_mismatch
 
 ```
 
-We performed a replication analysis in an EPIC dataset consisting of `r sum(samplesheet_EPIC$C9ORF72.Status == "expanded")` expanded cases and `r sum(samplesheet_EPIC$C9ORF72.Status == "normal")` non-expanded cases. 
+We performed a replication analysis in an EPIC dataset consisting of 33 expanded cases and 404 non-expanded cases. 
 
 ### QQ-plot
 
@@ -1685,6 +1778,42 @@ tab
 
 ```{r fisher_test_crossreactive_EPIC}
 fisher.test(tab)
+```
+
+## Probe sequence overlap with other repeats
+
+```{r}
+make_overview <- function(sequence, matches_all_methylated, matches_all_unmethylated, zhou) {
+  check1 <- matches_all_methylated[[sequence]] %>% dplyr::filter(width >= 14)
+  check2 <- matches_all_unmethylated[[sequence]] %>% dplyr::filter(width >= 14)
+  cr <- unique(c(check1$Probe, check2$Probe))
+  tibble(sequence = sequence, n_cr = dplyr::n_distinct(cr), 
+         n_cr_zhou = sum(unique(cr) %in% zhou$probeID))
+}
+
+overview_450k_methylated_unmethylated <- purrr::map_df(names(matches_450k_commonrepeats_methylated), 
+                          .f = make_overview, 
+                          zhou = zhou_450k,
+                          matches_all_methylated = matches_450k_commonrepeats_methylated,
+                          matches_all_unmethylated = matches_450k_commonrepeats_unmethylated)
+
+overview_EPIC_methylated_unmethylated <- purrr::map_df(names(matches_EPIC_commonrepeats_methylated), 
+                                                       .f = make_overview, 
+                          zhou = zhou_EPIC,
+                          matches_all_methylated = matches_EPIC_commonrepeats_methylated,
+                          matches_all_unmethylated = matches_EPIC_commonrepeats_unmethylated)
+```
+
+450k: 
+
+```{r}
+overview_450k_methylated_unmethylated
+```
+
+EPIC:
+
+```{r}
+overview_EPIC_methylated_unmethylated
 ```
 
 
@@ -1944,6 +2073,14 @@ ggsave(beta_plot_oob,
 saveRDS(beta_plot_oob,
         file = "../data/output/figs/beta_plot_oob.rds")
 
+## Beta density plots
+ggsave(densities_ib, filename = "../data/output/figs/beta_densities_ib.png",
+       dpi = 600, width = 5, height = 3.5, units = "in")
+       
+ggsave(densities_oob, filename = "../data/output/figs/beta_densities_oob.png",
+       dpi = 600, width = 5, height = 3.5, units = "in")
+
+
 ## EPIC replication.
 ggsave(compare_450k_epic,
        filename = "../data/output/figs/compare_450k_epic.png",
@@ -1974,9 +2111,13 @@ saveRDS(qqplot_EPIC,
         file = "../data/output/figs/qqplot_EPIC.rds")
 ```
 
-```{r, eval = FALSE}
 ## Save tables
+
 ```{r save_tables_etc, eval=FALSE, include=FALSE}
 readr::write_csv(probe_sequences_, path = "../data/output/tables/probe_sequences_trans.csv")
 readr::write_csv(pop, "../data/output/tables/study_population.csv")
+
+## Write tables 
+readr::write_csv(overview_450k_methylated_unmethylated, path = "../data/misc/overview_offtargetmatchesvaryingrepeats_450k.csv")
+readr::write_csv(overview_EPIC_methylated_unmethylated, path = "../data/misc/overview_offtargetmatchesvaryingrepeats_EPIC.csv")
 ```
