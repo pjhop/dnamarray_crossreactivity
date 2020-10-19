@@ -15,18 +15,25 @@ knitr::opts_chunk$set(echo = FALSE, cache = TRUE, cache.lazy = FALSE, warning=FA
 ```{r libraries, include = FALSE, cache = FALSE}
 library(tidyverse)
 library(ggsci)
-library(IlluminaHumanMethylation450kanno.ilmn12.hg19)
-library(IlluminaHumanMethylationEPICanno.ilm10b2.hg19)
-library(FDb.InfiniumMethylation.hg19)
 library(pheatmap)
 library(magrittr)
 library(colorblindr) # install: remotes::install_github("clauswilke/colorblindr")
+library(viridis)
+library(cowplot)
+library(kableExtra)
+library(ggrepel)
+library(RColorBrewer)
+library(bacon) # BioConductor (BiocManager::install("bacon"))
+library(FDb.InfiniumMethylation.hg19) # BioConductor (BiocManager::install("FDb.InfiniumMethylation.hg19"))
 
 # Source EWAS functions
 source("../R/ewas_plot_functions.R")
 ```
 
 ```{r global_vars, include = FALSE, cache = FALSE}
+# Save plots
+save_plots <- FALSE # if TRUE, plot objects won't be removed, and plots can be saved at the end of this markdown (this does require quite some RAM, since some of the plot objects are quite large)
+
 # Color palette
 scale_c9_match_pval_plots <- scale_color_OkabeIto()
 scale_diff_plots <- scale_color_OkabeIto(order = c(8,4,5,6,7,1,2,3))
@@ -39,6 +46,13 @@ scale_diff_plots <- scale_color_OkabeIto(order = c(8,4,5,6,7,1,2,3))
 text_size = 14
 point_size = 3
 ```
+
+Downstream analyses corresponding to the manuscript: "Crossreactive probes on Illumina DNA methylation arrays: a large study on ALS shows that a cautionary approach is warranted in interpreting epigenome-wide association studies". 
+The data used in this markdown can be downloaded from: <zenodo link>. 
+This script can be reproduced using the deposited data as follows:  
+- Clone the dnamarray_crossreactivity repository: <git clone  https://github.com/pjhop/dnamarray_crossreactivity.git>  
+- Download the data ('data.zip') and place it in the top directory of the dnamarray_crossreactivity folder.  
+- Unzip the data.zip folder  
 
 ```{r data, include = FALSE, cache=FALSE}
 ## 450k 
@@ -66,12 +80,10 @@ mlma_meta <- mlma_meta %>% dplyr::mutate(t = b/se)
 mlma_mvalues <- mlma_mvalues %>% dplyr::mutate(t = b/se)
 PCA_outliers <- readr::read_tsv("../data/temp/PCA_outliers.txt", col_names = FALSE)
 
-
 # Samplesheet
 samplesheet <- readRDS("../data/raw/samplesheet_NL_cleaned.rds")
 samplesheet <- samplesheet %>% 
   dplyr::filter(Inferred_C9_status %in% c("long", "wt"))
-samplesheet_raw <- readRDS("../data/raw/samplesheet_NL.rds")
 
 # Betas
 beta <- readRDS("../data/processed/beta_mlma_c9_loco_sig.rds")
@@ -94,7 +106,7 @@ matches_YpG_mismatch_indel_final <- readRDS("../data/processed/c9_matches/450k_m
 matches_YpG_nomismatch_final <- readRDS("../data/processed/c9_matches/450k_matches_YpG_nomismatch_final_start1bp.rds")
 
 # Annotation
-anno <- as.data.frame(getAnnotation(IlluminaHumanMethylation450kanno.ilmn12.hg19))
+anno <- readr::read_tsv("../data/extdata/anno_450k.txt.gz")
 
 ## Add p-values (normal + oob)
 matches_methylated_nomismatch_final <- matches_methylated_nomismatch_final %>% 
@@ -156,19 +168,21 @@ matches_methylated_nomismatch_final_max5 <- matches_methylated_nomismatch_final 
 matches_methylated_nomismatch_final_max5 <- matches_methylated_nomismatch_final_max5 %>%
   dplyr::filter(!Probe %in% matches_methylated_mismatch_indel_final$Probe)
 matches_methylated_mismatch_indel_final <- dplyr::bind_rows(matches_methylated_nomismatch_final_max5, matches_methylated_mismatch_indel_final)
+rm(matches_methylated_nomismatch_final_max5)
 
 matches_unmethylated_nomismatch_final_max5 <- matches_unmethylated_nomismatch_final %>%
   dplyr::filter(width <= 5)
 matches_unmethylated_nomismatch_final_max5 <- matches_unmethylated_nomismatch_final_max5 %>%
   dplyr::filter(!Probe %in% matches_unmethylated_mismatch_indel_final$Probe)
 matches_unmethylated_mismatch_indel_final <- dplyr::bind_rows(matches_unmethylated_nomismatch_final_max5, matches_unmethylated_mismatch_indel_final)
+rm(matches_unmethylated_nomismatch_final_max5)
 
 matches_YpG_nomismatch_final_max5 <- matches_YpG_nomismatch_final %>%
   dplyr::filter(width <= 5)
 matches_YpG_nomismatch_final_max5 <- matches_YpG_nomismatch_final_max5  %>%
   dplyr::filter(!Probe %in% matches_YpG_mismatch_indel_final$Probe)
 matches_YpG_mismatch_indel_final <- dplyr::bind_rows(matches_YpG_nomismatch_final_max5, matches_YpG_mismatch_indel_final)
-
+rm(matches_YpG_nomismatch_final_max5)
 
 ### Define cis/trans associations (<100kb)
 mlma <- mlma %>%
@@ -246,6 +260,27 @@ zhou_EPIC <- zhou_EPIC %>% dplyr::filter(MASK_sub30_copy | MASK_mapping)
 naeem <- read_csv("../data/extdata/12864_2013_7006_MOESM2_ESM.csv")
 naeem <- naeem %>% dplyr::filter(MultiMap == 1 | Repeat == 1)
 
+## Other EWAS methods
+ewas_meffil <- readRDS("../data/output/ewas/ewas_meffil_c9_missing0.05.rds")
+meffil_isva <- tibble(Probe = rownames(ewas_meffil$p.value), p = ewas_meffil$p.value[,"isva"])
+meffil_sva <- tibble(Probe = rownames(ewas_meffil$p.value), p = ewas_meffil$p.value[,"sva"])
+
+mlma_moment <- read_tsv("../data/output/ewas/mlma_moment_c9_covarsexbatch_qcovaragesmoking_missing0.05.mlma")
+mlma_moment <- mlma_moment %>% dplyr::mutate(t = b / se)
+
+mlma_moa <- read_tsv("../data/output/ewas/mlma_moa_c9_covarsexbatch_qcovaragesmoking_missing0.05.moa")
+mlma_moa <- mlma_moa %>% dplyr::mutate(t = b / se)
+
+baconize <- function(stats, df) {
+  bc <- bacon(effectsizes = cbind(stats$b), standarderrors = cbind(stats$se))
+  stats$b <- round(drop(es(bc)), digits = 6)
+  stats$se <- round(drop(se(bc)), digits = 6)
+  stats$t <- drop(tstat(bc))
+  stats$p <- 2*pt(abs(stats$t), df = df, lower.tail = FALSE)
+  stats
+}
+mlma_linear_bacon <- baconize(mlma_linear, df = max(mlma_linear$NMISS) - 20)
+
 ## Other
 
 ## Sequence overlap between 450/EPIC probes and varying repeat sequences
@@ -268,37 +303,6 @@ knitr::kable(samplesheet %>%
   dplyr::filter(Pheno == 2) %>%
   dplyr::mutate(ifelse(Pheno == 2, "ALS", Pheno)) %>%
   dplyr::count(Inferred_C9_status), format = "html") %>%
-  kableExtra::kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
-```
-
-Overview study population:
-
-```{r overview_study_population}
-pop <- samplesheet %>% 
-  dplyr::filter(Pheno == 2, !is.na(Inferred_C9_status)) %>%
-  dplyr::group_by(Pheno) %>%
-  dplyr::summarize(
-    nr_subjects = n(),
-    male = sum(Sex == 2),
-    male_percentage = mean(Sex == 2),
-    age = median(Predicted_Age),
-    age_interquartile_low = quantile(Predicted_Age, 1/4),
-    age_interquartile_high = quantile(Predicted_Age, 3/4),
-    C9_carrier = sum(Inferred_C9_status == "long"),
-    C9_carrier_percentage = mean(Inferred_C9_status == "long")
-  ) %>%
-  dplyr::group_by(Pheno) %>%
-  dplyr::mutate(male = sprintf("%s (%s)", male, round(male_percentage, 2)),
-                age = sprintf("%s (%s-%s)", round(age,1), round(age_interquartile_low, 1), round(age_interquartile_high, 1)),
-                C9_status = sprintf("%s (%s)", C9_carrier, round(C9_carrier_percentage, 3))) %>%
-  dplyr::select(Pheno, nr_subjects, male, age, C9_status)
-pop <- t(pop)
-col <- pop[1,]
-pop <- pop[2:nrow(pop),]
-pop <- as.data.frame(pop)
-colnames(pop) <- col
-
-knitr::kable(pop, format = "html") %>%
   kableExtra::kable_styling(bootstrap_options = "striped", full_width = F, position = "left")
 ```
 
@@ -411,7 +415,7 @@ heatmap <- pheatmap(cor(t(beta_), use = "complete.obs"),
                             fontsize = 5)
 ```
 
-```{r, out.width = "600px"}
+```{r, out.width = "600px", out.height = "600px"}
 knitr::include_graphics("../data/output/figs/heatmap_c9_loco_sig.pdf")
 ```
 
@@ -469,6 +473,12 @@ cowplot::plot_grid(plotlist = plots_trans_nochr9[5:8], nrow = 2)
 plots_trans_nochr9 <- purrr::map(mlma_sig_trans_nochr9$Probe, .f = plot_pvalues_DMPs, windowsize = 10000, DMPs = fdb, correlation_plot=FALSE, text_size = text_size, point_size = point_size)
 names(plots_trans_nochr9) <- mlma_sig_trans_nochr9$Probe
 cowplot::plot_grid(plotlist = plots_trans_nochr9[8:10], nrow = 2)
+```
+
+```{r, include = FALSE, cache = FALSE}
+rm(mlma_meta, mlma_mvalues, mlma_rmPCAoutliers, fdb, beta_)
+# Clean up 
+if(!save_plots) {rm(qqplot, manhattan, compare_rmPCAoutliers, compare_linear, compare_meta, compare_mvalues, plots_c9, plots_trans_chr9, plots_trans_nochr9, heatmap)}
 ```
 
 ### Probe sequences
@@ -901,7 +911,6 @@ ORs_plot <- enrichment_stats %>%
 ORs_plot
 ```
 
-
 ## Comparison with previous literature
 
 We checked how many of the identified cross-reactive probes were flagged in previous studies (Chen *et al.*, Naeem *et al.*, Zhou *et al.*):
@@ -955,6 +964,53 @@ This can be explained by
 (a) The C9 repeat expansion is not present in the reference genome.
 (b) Mismatches/INDELs where not allowed when mapping probes to the genome. 
 (c) Matches between these probes and the C9 repeat are smaller than cutoffs used in published lists (Zhou: >30bp, Chen: >47bp)
+
+
+```{r, include = FALSE, cache = FALSE}
+rm(diff_methylated_nomismatch_mismatch_indel)
+# Clean up 
+if(!save_plots) {rm(plot_typeI_nomismatch_noindel_correlated_methylated, plot_typeI_nomismatch_noindel_correlated_methylated_coloredswitch,
+manhattan_oob, qqplot_oob, plot_typeI_nomismatch_noindel_correlated_methylated_oobpvalues, diff_plot_nomismatch_mismatch_indel,
+plot_typeI_mismatch_indel_correlated_methylated_oobpvalues, plot_typeI_mismatch_indel_methylated_tstat, plot_typeII_nomismatch_noindel_correlated_methylated, plot_typeII_mismatch_indel_correlated_methylated, manhattan_hlightcrossreactive, manhattan_oob_hlightcrossreactive, ORs_plot, plot_typeI_mismatch_indel_correlated_methylated_reference, diff_plot_nomismatch_mismatch_indel_legend)}
+```
+
+## Number of spurious probes across varying EWAS methods
+
+```{r}
+mlma_loco_sig <- mlma %>%
+  filter(p < 0.05/nrow(.)) %>%
+  mutate(cr_c9 = Probe %in% crossreactive_probes_combined)
+mlma_moa_sig <- mlma_moa %>%
+  filter(p < 0.05/nrow(.)) %>%
+  mutate(cr_c9 = Probe %in% crossreactive_probes_combined)
+mlma_moment_sig <- mlma_moment %>%
+  filter(p < 0.05/nrow(.)) %>%
+  mutate(cr_c9 = Probe %in% crossreactive_probes_combined)
+mlma_linear_sig <- mlma_linear %>%
+  filter(p < 0.05/nrow(.)) %>%
+  mutate(cr_c9 = Probe %in% crossreactive_probes_combined)
+mlma_linear_bacon_sig <- mlma_linear_bacon %>%
+  filter(p < 0.05/nrow(.)) %>%
+  mutate(cr_c9 = Probe %in% crossreactive_probes_combined)
+meffil_isva_sig <- meffil_isva %>%
+  filter(p < 0.05/nrow(.)) %>%
+  mutate(cr_c9 = Probe %in% crossreactive_probes_combined)
+meffil_sva_sig <- meffil_sva %>%
+  filter(p < 0.05/nrow(.)) %>%
+  mutate(cr_c9 = Probe %in% crossreactive_probes_combined)
+
+ewas_methods <- tibble(
+  ewas_method = c("OSCA_LOCO", "OSCA_MOA", "OSCA_MOMENT", "Linear", "Linear_bacon", "SVA", "ISVA"),
+  `# Significant` = c(nrow(mlma_loco_sig), nrow(mlma_moa_sig), nrow(mlma_moment_sig), nrow(mlma_linear_sig), nrow(mlma_linear_bacon_sig),
+            nrow(meffil_sva_sig), nrow(meffil_isva_sig)
+            ),
+  `N Crossreactive` = c(sum(mlma_loco_sig$cr_c9), sum(mlma_moa_sig$cr_c9), sum(mlma_moment_sig$cr_c9), sum(mlma_linear_sig$cr_c9), sum(mlma_linear_bacon_sig$cr_c9),
+           sum(meffil_sva_sig$cr_c9), sum(meffil_isva_sig$cr_c9)
+           ),
+  `% Crossreactive` = paste0(signif((`N Crossreactive`/`# Significant`)*100, 3), "%")
+)
+ewas_methods
+```
 
 ## Sensitivity analyses
 
@@ -1042,6 +1098,14 @@ diff_plot_unmethylated_methylated_typeII <- test_methylated_unmethylated_mismatc
 diff_plot_unmethylated_methylated_typeII + theme(legend.position="right", legend.title = element_blank())
 ```
 
+```{r, include = FALSE, cache = FALSE}
+rm(test_methylated_unmethylated_mismatch_indel_typeII, test_methylated_unmethylated_mismatch_indel2,
+   mlma_moa, meffil_sva, meffil_isva, mlma_linear, mlma_linear_bacon, mlma_moment,
+   mlma_loco_sig, mlma_moa_sig, mlma_moment_sig, mlma_linear_sig, mlma_linear_bacon_sig)
+
+# Clean up 
+if(!save_plots) {rm(diff_plot_unmethylated_methylated_typeII, diff_plot_unmethylated_methylated_typeI)}
+```
 
 ### Using Y bases (IUPAC) to represent C's in CpG-sites
 
@@ -1122,6 +1186,12 @@ diff_plot_unmethylated_YpG_mismatch_indel2_2 <- test_unmethylated_YpG_mismatch_i
 diff_plot_unmethylated_YpG_mismatch_indel2_2 + theme(legend.position="right", legend.title = element_blank())
 ```
 
+```{r, include = FALSE, cache = FALSE}
+rm(test_methylated_YpG_mismatch_indel2, test_unmethylated_YpG_mismatch_indel2)
+# Clean up 
+if(!save_plots) {rm(diff_plot_methylated_YpG_mismatch_indel2_2, diff_plot_unmethylated_YpG_mismatch_indel2_2)}
+```
+
 Type II probes:
 
 ```{r diff_typeII_YpG_unmethylated}
@@ -1196,6 +1266,11 @@ diff_plot_typeII_methylated_YpG_mismatch_indel2_2 <- test_typeII_YpG_mismatch_in
 diff_plot_typeII_methylated_YpG_mismatch_indel2_2 + theme(legend.position="right", legend.title = element_blank())
 ```
 
+```{r, include = FALSE, cache = FALSE}
+rm(test_typeII_YpG_mismatch_indel2_unmethylated, test_typeII_YpG_mismatch_indel2_methylated, matches_YpG_mismatch_indel_final, matches_YpG_nomismatch_final)
+# Clean up 
+if(!save_plots) {rm(diff_plot_typeII_methylated_YpG_mismatch_indel2_2, diff_plot_typeII_unmethylated_YpG_mismatch_indel2_2)}
+```
 
 ### Include Regions Flanking the C9 repeat 
 
@@ -1207,6 +1282,7 @@ matches_methylated_nomismatch_includeflanking_final_max5 <- matches_methylated_n
 matches_methylated_nomismatch_includeflanking_final_max5 <- matches_methylated_nomismatch_includeflanking_final_max5  %>%
   dplyr::filter(!Probe %in% matches_methylated_mismatch_indel_includeflanking_final$Probe)
 matches_methylated_mismatch_indel_includeflanking_final <- dplyr::bind_rows(matches_methylated_nomismatch_includeflanking_final_max5, matches_methylated_mismatch_indel_includeflanking_final)
+rm(matches_methylated_nomismatch_includeflanking_final_max5)
 
 ## Add annotation
 matches_methylated_mismatch_indel_includeflanking_final <- matches_methylated_mismatch_indel_includeflanking_final %>% 
@@ -1237,6 +1313,7 @@ matches_unmethylated_nomismatch_includeflanking_final_max5 <- matches_unmethylat
 matches_unmethylated_nomismatch_includeflanking_final_max5 <- matches_unmethylated_nomismatch_includeflanking_final_max5  %>%
   dplyr::filter(!Probe %in% matches_unmethylated_mismatch_indel_includeflanking_final$Probe)
 matches_unmethylated_mismatch_indel_includeflanking_final <- dplyr::bind_rows(matches_unmethylated_nomismatch_includeflanking_final_max5, matches_unmethylated_mismatch_indel_includeflanking_final)
+rm(matches_unmethylated_nomismatch_includeflanking_final_max5)
 
 ## Add annotation
 matches_unmethylated_mismatch_indel_includeflanking_final <- matches_unmethylated_mismatch_indel_includeflanking_final %>% 
@@ -1297,6 +1374,12 @@ diff_plot_flanking_methylated <- diff_flanking_methylated %>%
 diff_plot_flanking_methylated + theme(legend.position="right", legend.title = element_blank())
 ```
 
+```{r, include = FALSE, cache = FALSE}
+rm(diff_flanking_methylated, matches_methylated_nomismatch_includeflanking_final)
+# Clean up 
+if(!save_plots) {rm(diff_plot_flanking_methylated)}
+```
+
 ```{r diff_flanking_both}
 matches_methylated_unmethylated_mismatch_indel_final <- dplyr::bind_rows(matches_methylated_mismatch_indel_final, matches_unmethylated_mismatch_indel_final)
 matches_methylated_unmethylated_mismatch_indel_final <- matches_methylated_unmethylated_mismatch_indel_final %>%
@@ -1344,17 +1427,17 @@ diff_plot_flanking_both <- diff_flanking_both %>%
   ylab("Inexact C9 Match Length (incl. flanking)") 
 diff_plot_flanking_both + theme(legend.position="right", legend.title = element_blank())
 ```
+```{r, include = FALSE, cache = FALSE}
+rm(diff_flanking_both, matches_methylated_unmethylated_mismatch_indel_includeflanking_final, matches_methylated_mismatch_indel_includeflanking_final, matches_unmethylated_nomismatch_includeflanking_final)
+# Clean up 
+if(!save_plots) {rm(diff_plot_flanking_both)}
+```
 
 ### Allowing mismatch/INDEL closer to the 3'end of the probe
 
 As shown previously, one significant probe remains that would have a considerable C9 match when we would have allowed mismatches/indel closer to the 3'end of the probe. We ran the algorithm again, allowing a mismatch/INDEL at any location in the probe (instead of >5bp).
 
-
-
 ```{r mismatch_indel_0bp}
-
-
-
 matches_methylated_mismatch_indel_0bp_final_14bp <- matches_methylated_mismatch_indel_0bp_final %>%
   dplyr::filter(width >= 14)
 
@@ -1418,9 +1501,11 @@ matches_methylated_unmethylated_mismatch_indel_0bp_final <- matches_methylated_u
 diff_0bp_both <- matches_methylated_unmethylated_mismatch_indel_final  %>%
   dplyr::left_join(matches_methylated_unmethylated_mismatch_indel_0bp_final %>% dplyr::select(Probe, Type2, width), 
                    by = "Probe") %>%
-  dplyr::mutate(diff = width.y-width.x) %>%
-  dplyr::filter(!duplicated(.))
-
+  dplyr::mutate(diff = width.y-width.x,
+                id = paste(Probe, strand, width.x, width.y, start, end,sequence_bs, sbe_site,Type2.x,Type2.y, sep ="_")
+                ) %>%
+  dplyr::filter(!duplicated(id)) %>%
+  dplyr::select(-id)
 
 diff_0bp_both <- diff_0bp_both %>%
   dplyr::mutate(pvalue = dplyr::case_when(
@@ -1454,6 +1539,11 @@ diff_plot_0bp_both <- diff_0bp_both %>%
   ylab("Inexact (\u22651bp) C9 Match Length") 
 diff_plot_0bp_both + theme(legend.position="right", legend.title = element_blank())
 
+```
+
+```{r, include = FALSE, cache=FALSE}
+rm(diff_0bp_both, matches_methylated_unmethylated_mismatch_indel_0bp_final, matches_unmethylated_mismatch_indel_0bp_final, matches_methylated_mismatch_indel_0bp_final, matches_methylated_mismatch_indel_0bp_final_14bp, matches_unmethylated_mismatch_indel_0bp_final_14bp)
+if(!save_plots) {rm(diff_plot_0bp_both)}
 ```
 
 ## Signal intensities
@@ -1550,6 +1640,7 @@ beta_plot_oob <- samplesheet_oob %>%
         legend.position = "none")
 beta_plot_oob
 ```
+
 ### Beta density plots
 
 in-band:
@@ -1618,11 +1709,8 @@ densities_oob
 ## EPIC replication set 
 
 ```{r data_EPIC, include = FALSE}
-##### EPIC ######
-data(IlluminaHumanMethylationEPICanno.ilm10b2.hg19)
-
-# Annotation
-annoEPIC <- as.data.frame(getAnnotation(IlluminaHumanMethylationEPICanno.ilm10b2.hg19))
+# annotation
+annoEPIC <- readr::read_tsv("../data/extdata/anno_EPIC.txt.gz")
 
 mlma_EPIC_oob <- mlma_EPIC_oob %>% 
   dplyr::mutate(t = b / se) %>%

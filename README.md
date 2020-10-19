@@ -3,6 +3,13 @@
 Scripts accompanying the manuscript 'Crossreactive probes on Illumina DNA methylation arrays: a large study on ALS shows that a cautionary approach is warranted in interpreting epigenome-wide association studies'. This repository contains the scripts used for analyses. For convenience, we wrapped
 several functions into an R package, which is available at: https://github.com/pjhop/DNAmCrosshyb.
 
+## Data availability
+The data used in downstream analyses can be downloaded from: <zenodo link>. 
+All downstream analyses in c9_analysis.Rmd (https://github.com/pjhop/dnamarray_crossreactivity/blob/master/analysis/c9_analysis.Rmd) and in supplementary_note.Rmd (https://github.com/pjhop/dnamarray_crossreactivity/blob/master/analysis/supplementary_note.Rmd) can be reproduced using the deposited data as follows:
+- Clone this repository: <git clone  https://github.com/pjhop/dnamarray_crossreactivity.git>
+- Download the data ('data.zip') and place it in the top directory of the dnamarray_crossreactivity folder. 
+- Unzip the data.zip folder
+
 ## Overview
 **R**: Contains some reusable scripts for plotting and mapping probes to sequences.  
 **analysis**: Contains scripts used for the analyses presented in the paper  
@@ -14,6 +21,7 @@ Also contains scripts to perform meta-analyses.
 * **c9_matches**: Folder that contains scripts to map 450k and EPIC probes to the *C9orf72* repeat expansion.
 Includes scripts to do so in different ways, for example: assuming that the repeat is
 methylated/unmethylated, representing CpGs by YpG, including flanking regions etc.
+* **other**: Folder that contains script to match 450k/EPIC probes to various repeat sequences.  
 * **c9_analysis.Rmd**: Main Rmarkdown file in which all downstream analyses are performed and figures/tables are generated.
 * **supplementary_note.Rmd**: Rmarkdown that generates the supplementary note.
 

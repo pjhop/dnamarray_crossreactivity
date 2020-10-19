@@ -4,7 +4,6 @@ library(ggrepel)
 library(ggplot2)
 library(dplyr)
 library(RColorBrewer)
-library(IlluminaHumanMethylation450kanno.ilmn12.hg19)
 
 ## Adapted from: https://github.com/pcgoddard/Burchardlab_Tutorials/wiki/GGplot2-Manhattan-Plot-Function#script
 gg.manhattan <- function(stats, array = "450k", annotate_stats = FALSE, threshold = NULL, sugg = NULL,

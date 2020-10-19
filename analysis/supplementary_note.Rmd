@@ -16,16 +16,27 @@ bibliography: Paper.bib
 knitr::opts_chunk$set(echo = TRUE, cache = TRUE)
 ```
 
-```{r packages, include = FALSE}
+Supplementary note corresponding to the manuscript: "Crossreactive probes on Illumina DNA methylation arrays: a large study on ALS shows that a cautionary approach is warranted in interpreting epigenome-wide association studies". 
+
+## Data availability
+
+The data used in this markdown can be downloaded from: <zenodo link>. 
+This script can be reproduced using the deposited data as follows:  
+- Clone the dnamarray_crossreactivity repository: <git clone  https://github.com/pjhop/dnamarray_crossreactivity.git>  
+- Download the data ('data.zip') and place it in the top directory of the dnamarray_crossreactivity folder.  
+- Unzip the data.zip folder  
+
+```{r packages, include = FALSE, cache = FALSE}
 library(tidyverse)
 library(DNAmCrosshyb)
 library(wateRmelon)
 library(minfi)
-library(wateRmelon)
-library(minfi)
+library(viridis)
+library(pheatmap)
+library(minfiData)
 ```
 
-```{r data, include = FALSE}
+```{r data, include = FALSE, cache=FALSE}
 # MLMA results 
 mlma <- read_tsv("../data/output/ewas/mlma_loco_c9_covarsexbatch_qcovaragesmoking_missing0.05.loco.mlma")
 mlma_oob <- read_tsv("../data/output/ewas/mlma_moa_c9_covarsexbatch_qcovaragesmoking_oob.mlma")
@@ -36,9 +47,10 @@ mlma_oob <- mlma_oob %>%
   
 mlma_sig <- mlma %>% dplyr::filter(p < 0.05/nrow(.))
 mlma_oob_sig <- mlma_oob %>% dplyr::filter(p_oob < 0.05/nrow(.))
+
 # Samplesheet
-samplesheet_raw <- readRDS("../data/raw/samplesheet_NL.rds")
 samplesheet <- readRDS("../data/raw/samplesheet_NL_cleaned.rds")
+
 # Betas
 beta <- readRDS("../data/processed/beta_mlma_c9_loco_sig.rds")
 
@@ -47,6 +59,11 @@ samplesheet_c9mutated <- samplesheet %>% dplyr::filter(Inferred_C9_status == "lo
 beta_sig <- beta[mlma_sig$Probe,samplesheet_c9mutated$Sample_Name]
 
 # External data
+# Zhou et al. annotations
+# Downloads: (downloaded at 17/09/2020)
+# wget http://zwdzwd.io/InfiniumAnnotation/current/EPIC/EPIC.hg19.manifest.tsv.gz
+# wget http://zwdzwd.io/InfiniumAnnotation/current/HM450/HM450.hg19.manifest.tsv.gz
+# wget http://zwdzwd.io/InfiniumAnnotation/current/HM450/HM450.hg19.manifest.pop.tsv.gz 
 zhou_450k <- read_tsv("../data/extdata/HM450.hg19.manifest.tsv.gz")
 zhou_EPIC <- read_tsv("../data/extdata/EPIC.hg19.manifest.tsv.gz")
 zhou_450k_pop <- read_tsv("../data/extdata/HM450.hg19.manifest.pop.tsv.gz")
@@ -82,15 +99,10 @@ for example when the off-target matches are located in a repeat region. It is no
 
 Zhou annotations:
 
-```{r zhou_annotation, message = FALSE}
-path_zhou_hg38 <- "http://zwdzwd.io/InfiniumAnnotation/20180909/HM450/HM450.hg38.manifest.tsv.gz"
-zhou_hg38 <- readr::read_tsv(path_zhou_hg38)
-```
-
 ```{r zhou_hg38, message = FALSE}
 # The MASK_sub30_copy column indicates that the probe has one or more >=30 bp off-target matches.
 # The MASK_mapping column indicates that the probe has a low quality score
-zhou_hg38 %>% dplyr::select(probeID, MASK_sub30_copy, MASK_mapping) %>%
+zhou_450k %>% dplyr::select(probeID, MASK_sub30_copy, MASK_mapping) %>%
   dplyr::filter(MASK_sub30_copy | MASK_mapping) %>%
   head()
 ```
@@ -102,8 +114,8 @@ Mapping probes to a non-reference sequence using the `DNAmCrosshyb` package (GGC
 repeat_sequence <- paste(rep("GGCCCC", 10), collapse="")
 
 matches_c9 <- map_probes_sequence(sequence = repeat_sequence, next_base = "G", prev_base = "C",
-                            array = "450k", min_width = 10, 
-                            max_width = 25, allow_indel = FALSE, 
+                            array = "450k", min_width = 14, 
+                            max_width = 30, allow_indel = FALSE, 
                             allow_mismatch = FALSE, step_size = 1, 
                             use_Y = FALSE, methylation_status = "methylated")
 
@@ -113,7 +125,7 @@ data.frame(matches_c9 %>% dplyr::arrange(desc(width))) %>% head()
 Mapping probes to several disease-associated repeat-sequences:
 
 ```{r, warning = FALSE, message = FALSE, cache = TRUE}
-## run for several sequences 
+## run for several sequences, takes 30-40 minutes to run
 sequences <- list(
   ATTCT = list(
     sequence = paste(rep("ATTCT", 15), collapse=""),
@@ -156,7 +168,7 @@ run <- function(lst) {
   matches <- map_probes_sequence(sequence = lst[["sequence"]], 
                                  next_base = lst[["next_base"]], 
                                  prev_base = lst[["prev_base"]],
-                      array = "450k", min_width = 10, max_width = 35, 
+                      array = "450k", min_width = 14, max_width = 20, 
                       allow_indel = TRUE, 
                       allow_mismatch = TRUE, step_size = 1, 
                       use_Y = TRUE)
@@ -167,8 +179,7 @@ matches_all <- purrr::map(sequences, .f = run)
 names(matches_all) <- names(sequences)
 
 # Check number of probes with >=14bp match for each sequence 
-# Check if filtered by zhou et al 
-#zhou <- readr::read_tsv("../data/extdata/hm450.hg38.manifest.tsv.gz")
+# Check if filtered by Zhou et al.
 zhou <- zhou_450k %>% dplyr::filter(MASK_sub30_copy | MASK_mapping)
 make_overview <- function(sequence, matches_all) {
   check <- matches_all[[sequence]] %>% dplyr::filter(width >= 14)
@@ -180,8 +191,12 @@ overview
 ```
 
 Mapping probes to the reference genome sequence, allowing mismatches and identifying off-target matches as small as 15bp. 
+Bisulfite-converted reference genomes can be generated using the following scripts: https://github.com/pjhop/DNAmCrosshyb/blob/master/data-raw/bisulfite_convert_hg19.R and https://github.com/pjhop/DNAmCrosshyb/blob/master/data-raw/bisulfite_convert_hg38.R 
+
+Bisulfite-converted genomes in the R .rds file format are available at: https://zenodo.org/record/4088020
 
 ```{r map_probes_ref, cache = TRUE, message = FALSE}
+# takes 30-40 minutes to run
 probes <- c("cg00005164", "cg12344104", "cg25521682", 
             "cg27660038", "cg20554142", "cg03890998", 
             "cg00947801")
@@ -189,7 +204,7 @@ matches <- map_probes(probes,
                       path = "../data/genome_bs/hg19",
                       chromosomes = "all",
                       min_width = 15,
-                      max_width = 35,
+                      max_width = 20,
                       step_size = 5,
                       allow_mismatch = TRUE,
                       allow_INDEL = FALSE,
@@ -327,9 +342,14 @@ In the *C9orf72* case, all OOB associations shared the same sequence, and thus h
 
 We included a function to extract OOB betas/intensities from a RGset (*minfi*). Within this function, data is first normalized using the *naten* function from the *wateRmelon* package. An EWAS can then be performed on these betas using your preferred EWAS method (we prefer the OSCA method [@zhang_osca:_2019-1]).
 
-```{r get_oob_betas, eval = FALSE}
+```{r get_oob_betas}
+# Using example data included in minfiData:
+baseDir <- system.file("extdata", package="minfiData")
+samplesheet <- read.metharray.sheet(baseDir)
+rgset <- read.metharray(samplesheet$Basename, extended=TRUE)
+
 oob <- get_OOB(rgset, normalized = TRUE, keep = "both")
-oob_betas <- oob$betas
+oob_betas <- oob$beta
 oob_total_intensities <- oob$total
 ```
 
@@ -350,12 +370,9 @@ EWAS methods normally used on  $\beta$-values (or M-values) can also be used to 
 Extracting total signal intensities:
 
 ```{r get_signal_intensities, eval = FALSE}
-# In-band 
-
-
 # Extract total signal intensities after normalization using dasen
-rgset <- dasen(rgset)
-total <- getCN(rgset)
+rgset_dasen <- dasen(rgset)
+total <- getCN(rgset_dasen)
 
 # Extract total OOB signal intensities after normalization using dasen
 # Using the function from DNAmCrosshyb
@@ -369,20 +386,15 @@ oob_total <- oob$total
 Finally, we note that in addition to cross-hybridization, other issues such as SNPs underlying the probe sequence could result in spurious associations. These issues are outside the scope of the current work, but we note that previously studies have considered these issues in detail [@zhou_comprehensive_2017; @andrews_gap_2016]. Example using population-specific SNP masking from Zhou *et al.*
 
 ```{r, message = FALSE}
-path_zhou_pop <- "http://zwdzwd.io/InfiniumAnnotation/current/HM450/HM450.hg38.manifest.pop.tsv.gz"
-anno_pop <- readr::read_tsv(path_zhou_pop)
-
 ## Select SNP-containing probes based on European population:
-anno_pop_EUR <- anno_pop %>%
+zhou_450k_pop_EUR <- zhou_450k_pop %>%
   dplyr::filter(MASK_snp5_EUR)
 ```
 
 Furthermore, one might want to filter probes that have a low mapping quality:
 
 ```{r, message = FALSE}
-path <- "http://zwdzwd.io/InfiniumAnnotation/current/HM450/HM450.hg38.manifest.tsv.gz"
-anno_zhou <- readr::read_tsv(path)
-anno_zhou %>% dplyr::filter(MASK_mapping) %>% dplyr::select(probeID, MASK_mapping) %>% head()
+zhou_450k %>% dplyr::filter(MASK_mapping) %>% dplyr::select(probeID, MASK_mapping) %>% head()
 ```
 
 ### References
