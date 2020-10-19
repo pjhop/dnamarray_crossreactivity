@@ -4,7 +4,7 @@ Scripts accompanying the manuscript 'Crossreactive probes on Illumina DNA methyl
 several functions into an R package, which is available at: https://github.com/pjhop/DNAmCrosshyb.
 
 ## Data availability
-The data used in downstream analyses can be downloaded from: <zenodo link>. 
+The data used in downstream analyses can be downloaded from: https://sandbox.zenodo.org/record/684090. 
 All downstream analyses in c9_analysis.Rmd (https://github.com/pjhop/dnamarray_crossreactivity/blob/master/analysis/c9_analysis.Rmd) and in supplementary_note.Rmd (https://github.com/pjhop/dnamarray_crossreactivity/blob/master/analysis/supplementary_note.Rmd) can be reproduced using the deposited data as follows:
 - Clone this repository: <git clone  https://github.com/pjhop/dnamarray_crossreactivity.git>
 - Download the data ('data.zip') and place it in the top directory of the dnamarray_crossreactivity folder. 

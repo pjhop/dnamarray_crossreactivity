@@ -48,7 +48,7 @@ point_size = 3
 ```
 
 Downstream analyses corresponding to the manuscript: "Crossreactive probes on Illumina DNA methylation arrays: a large study on ALS shows that a cautionary approach is warranted in interpreting epigenome-wide association studies". 
-The data used in this markdown can be downloaded from: <zenodo link>. 
+The data used in this markdown can be downloaded from: https://sandbox.zenodo.org/record/684090. 
 This script can be reproduced using the deposited data as follows:  
 - Clone the dnamarray_crossreactivity repository: <git clone  https://github.com/pjhop/dnamarray_crossreactivity.git>  
 - Download the data ('data.zip') and place it in the top directory of the dnamarray_crossreactivity folder.  
