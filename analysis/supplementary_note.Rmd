@@ -340,7 +340,7 @@ In the *C9orf72* case, all OOB associations shared the same sequence, and thus h
 
 #### Example
 
-We included a function to extract OOB betas/intensities from a RGset (*minfi*). Within this function, data is first normalized using the *naten* function from the *wateRmelon* package. An EWAS can then be performed on these betas using your preferred EWAS method (we prefer the OSCA method [@zhang_osca:_2019-1]).
+We included a function to extract OOB betas/intensities from a RGset (*minfi*). Within this function, data is first normalized using the *naten* function from the *wateRmelon* package. An EWAS can then be performed on these betas using your preferred EWAS method (we prefer the OSCA method [@zhang_osca:_2019]).
 
 ```{r get_oob_betas}
 # Using example data included in minfiData:
