@@ -23,7 +23,6 @@ temp/
 data/
 supplementary_note_files/
 supplementary_note_cache/
-*.bib
 test/
 c9_analysis_cache/
 c9_analysis_files/

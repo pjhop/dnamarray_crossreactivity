@@ -9,7 +9,7 @@ output:
   pdf_document:
     toc: true
     toc_depth: 3
-bibliography: Paper.bib
+bibliography: supplementary_note.bib
 ---
 
 ```{r setup, include = FALSE}
