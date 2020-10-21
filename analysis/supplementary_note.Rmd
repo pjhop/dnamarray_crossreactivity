@@ -3,10 +3,10 @@ title: "Supplementary Note"
 author: "Paul Hop"
 date: "7/2020"
 output: 
-  html_document:
+  pdf_document:
     toc: true
     toc_depth: 3
-  pdf_document:
+  html_document:
     toc: true
     toc_depth: 3
 bibliography: supplementary_note.bib
@@ -20,10 +20,10 @@ Supplementary note corresponding to the manuscript: "Crossreactive probes on Ill
 
 ## Data availability
 
-The data used in this markdown can be downloaded from: https://sandbox.zenodo.org/record/684090. 
+The data used in this markdown can be downloaded from: https://doi.org/10.5281/zenodo.4110015. 
 This script can be reproduced using the deposited data as follows:  
-- Clone the dnamarray_crossreactivity repository: < git clone  https://github.com/pjhop/dnamarray_crossreactivity.git >  
-- Download the data ('data.zip') and place it in the top directory of the dnamarray_crossreactivity folder.  
+- Clone this repository: < git clone  https://github.com/pjhop/dnamarray_crossreactivity.git >  
+- Download the data ('data.zip') and place it in the 'dnamarray_crossreactivity' folder.  
 - Unzip the data.zip folder  
 
 ```{r packages, include = FALSE, cache = FALSE}
@@ -193,7 +193,7 @@ overview
 Mapping probes to the reference genome sequence, allowing mismatches and identifying off-target matches as small as 15bp. 
 Bisulfite-converted reference genomes can be generated using the following scripts: https://github.com/pjhop/DNAmCrosshyb/blob/master/data-raw/bisulfite_convert_hg19.R and https://github.com/pjhop/DNAmCrosshyb/blob/master/data-raw/bisulfite_convert_hg38.R 
 
-Bisulfite-converted genomes in the R .rds file format are available at: https://zenodo.org/record/4088020
+Bisulfite-converted genomes in the R .rds file format are available at: https://doi.org/10.5281/zenodo.4088019
 
 ```{r map_probes_ref, cache = TRUE, message = FALSE}
 # takes 30-40 minutes to run

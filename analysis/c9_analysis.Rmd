@@ -48,11 +48,12 @@ point_size = 3
 ```
 
 Downstream analyses corresponding to the manuscript: "Crossreactive probes on Illumina DNA methylation arrays: a large study on ALS shows that a cautionary approach is warranted in interpreting epigenome-wide association studies". 
-The data used in this markdown can be downloaded from: https://sandbox.zenodo.org/record/684090. 
+The data used in this markdown can be downloaded from: https://doi.org/10.5281/zenodo.4110015. 
 This script can be reproduced using the deposited data as follows:  
-- Clone the dnamarray_crossreactivity repository: < git clone  https://github.com/pjhop/dnamarray_crossreactivity.git >  
-- Download the data ('data.zip') and place it in the top directory of the dnamarray_crossreactivity folder.  
+- Clone this repository: < git clone  https://github.com/pjhop/dnamarray_crossreactivity.git >  
+- Download the data ('data.zip') and place it in the 'dnamarray_crossreactivity' folder.  
 - Unzip the data.zip folder  
+
 
 ```{r data, include = FALSE, cache=FALSE}
 ## 450k 
@@ -1674,6 +1675,7 @@ densities_ib <- samplesheet_ib %>%
   facet_wrap(~Probe, scales = "free")
 densities_ib
 ```
+
 out-of-band:
 
 ```{r}
@@ -1954,6 +1956,7 @@ saveRDS(manhattan_oob, file = "../data/output/figs/manhattan_oob.rds")
 
 # C9 match plots
 
+# dir.create("../data/output/figs/c9_overlaps")
 # No misamatch/indel
 ggsave(plot_typeI_nomismatch_noindel_correlated_methylated, 
        filename = "../data/output/figs/c9_overlaps/typeI_nomismatch_noindel_correlated_methylated.png",
