@@ -6,7 +6,7 @@ library(dplyr)
 library(RColorBrewer)
 
 ## Adapted from: https://github.com/pcgoddard/Burchardlab_Tutorials/wiki/GGplot2-Manhattan-Plot-Function#script
-gg.manhattan <- function(stats, array = "450k", annotate_stats = FALSE, threshold = NULL, sugg = NULL,
+gg.manhattan <- function(stats, array = "450k", annotate_stats = NULL, threshold = NULL, sugg = NULL,
                          hlight = NULL, annotate = FALSE,
                          title = NULL, col = NULL, ylims = NULL, text_size = 9, point_size = 1){
 
