@@ -8,7 +8,7 @@ library(RColorBrewer)
 ## Adapted from: https://github.com/pcgoddard/Burchardlab_Tutorials/wiki/GGplot2-Manhattan-Plot-Function#script
 gg.manhattan <- function(stats, array = "450k", annotate_stats = NULL, threshold = NULL, sugg = NULL,
                          hlight = NULL, annotate = FALSE,
-                         title = NULL, col = NULL, ylims = NULL, text_size = 9, point_size = 1){
+                         title = NULL, col = NULL, ylims = NULL, text_size = 9, point_size = 1, label_size = 2.5){
 
   if(is.null(threshold)) {
     threshold <- 0.05 / nrow(stats) # Use bonferroni by default
@@ -107,7 +107,7 @@ gg.manhattan <- function(stats, array = "450k", annotate_stats = NULL, threshold
   }
   if(annotate) {
     g <- g + geom_label_repel(data = stats.tmp %>% dplyr::filter(is_annotate),
-                              aes(label = as.factor(gene), alpha=0.7), size=5, force=1.3)
+                              aes(label = as.factor(gene), alpha=0.7), size=label_size, force=1.3)
   }
   g
 
